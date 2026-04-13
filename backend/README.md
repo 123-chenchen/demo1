@@ -1,0 +1,138 @@
+# PDF Chatbot Backend
+
+Tat ca logic backend da duoc dua vao thu muc `backend/`.
+
+## Cau truc thu muc
+
+```text
+backend/
+|-- app/
+|   |-- api/
+|   |   |-- routers/
+|   |   |-- crud_router.py
+|   |   `-- router.py
+|   |-- core/
+|   |   `-- config.py
+|   |-- crud/
+|   |-- db/
+|   |   |-- models/
+|   |   |   |-- auth.py
+|   |   |   |-- chat.py
+|   |   |   |-- document.py
+|   |   |   |-- shared.py
+|   |   |   `-- __init__.py
+|   |   |-- base.py
+|   |   |-- README.md
+|   |   `-- session.py
+|   |-- schemas/
+|   |-- __init__.py
+|   `-- main.py
+|-- migrations/
+|   |-- versions/
+|   |-- env.py
+|   `-- script.py.mako
+|-- alembic.ini
+|-- main.py
+`-- pyproject.toml
+```
+
+## Schema
+
+- `users`: tai khoan dang nhap.
+- `refresh_tokens`: luu refresh token dang hoat dong hoac da revoke.
+- `documents`: moi file PDF la mot record.
+- `document_contents`: luu text thô da extract tu tai lieu, 1-1 voi `documents`.
+- `document_chunks`: moi doan text sau khi chunk la mot record, co `qdrant_point_id` de map sang vector trong Qdrant.
+- `chat_sessions`: dai dien cho mot cuoc hoi thoai, co the gan voi `user_id`.
+- `chat_messages`: luu cau hoi cua user va cau tra loi cua bot.
+- `message_sources`: luu cac chunk da duoc dung de tao cau tra loi.
+
+Tai lieu chi tiet ve database va y nghia tung attribute nam o `app/db/README.md`.
+
+## Cach chay
+
+`docker-compose.yml` va `.env.example` nam o root de sau nay co the them frontend/local services dung chung.
+
+Chay bang Docker Compose:
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+```
+
+Chay backend local khong dung compose:
+
+```bash
+cp .env.example .env
+docker compose up -d postgres
+cd backend
+uv sync
+uv run alembic upgrade head
+uv run pdf-chatbot
+```
+
+Server mac dinh chay tai `http://127.0.0.1:8000`.
+
+- Swagger UI: `http://127.0.0.1:8000/docs`
+- OpenAPI JSON: `http://127.0.0.1:8000/openapi.json`
+- Healthcheck: `http://127.0.0.1:8000/health`
+
+## Lenh huu ich
+
+```bash
+uv run alembic current
+uv run alembic revision --autogenerate -m "add new table"
+uv run python main.py
+uv run uvicorn app.main:app --reload
+```
+
+Backend se doc bien moi truong tu `.env` trong `backend/`, neu khong co thi se fallback sang `.env` o root.
+
+Neu chay bang Docker Compose, service `backend` se tu dong:
+
+- cho `postgres` healthy
+- chay `alembic upgrade head`
+- mo FastAPI o cong `8000`
+
+Compose override `QDRANT_URL` thanh `http://host.docker.internal:6333` cho backend container. Neu chay backend local tren may host thi co the giu `QDRANT_URL=http://localhost:6333`.
+
+## CRUD API
+
+Tat ca endpoint CRUD nam duoi prefix `/api`.
+
+- `GET/POST /api/users`
+- `GET/PATCH/DELETE /api/users/{item_id}`
+- `GET/POST /api/refresh-tokens`
+- `GET/PATCH/DELETE /api/refresh-tokens/{item_id}`
+- `GET/POST /api/documents`
+- `GET/PATCH/DELETE /api/documents/{item_id}`
+- `GET/POST /api/document-contents`
+- `GET/PATCH/DELETE /api/document-contents/{item_id}`
+- `GET/POST /api/document-chunks`
+- `GET/PATCH/DELETE /api/document-chunks/{item_id}`
+- `GET/POST /api/chat-sessions`
+- `GET/PATCH/DELETE /api/chat-sessions/{item_id}`
+- `GET/POST /api/chat-messages`
+- `GET/PATCH/DELETE /api/chat-messages/{item_id}`
+- `GET/POST /api/message-sources`
+- `GET/PATCH/DELETE /api/message-sources/{item_id}`
+
+Ghi chu:
+
+- `POST /api/users` nhan `password` va backend se hash thanh `password_hash`.
+- `POST /api/refresh-tokens` nhan `token_value` va backend se hash thanh `token_hash`.
+- Danh sach endpoint ho tro `skip` va `limit`.
+
+## Bien moi truong
+
+```env
+API_HOST=0.0.0.0
+API_PORT=8000
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_DB=pdf_chatbot
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/pdf_chatbot
+QDRANT_URL=http://localhost:6333
+```
