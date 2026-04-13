@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ app_name }} Demo</title>
+    <style>
+        :root {
+            --bg: #f4efe4;
+            --panel: rgba(255, 252, 246, 0.82);
+            --panel-strong: #fffaf1;
+            --ink: #1e1a16;
+            --muted: #6d6357;
+            --line: rgba(36, 28, 19, 0.12);
+            --accent: #0e7c66;
+            --accent-soft: rgba(14, 124, 102, 0.12);
+            --warn: #d16d36;
+            --danger: #b43f2e;
+            --shadow: 0 24px 80px rgba(33, 22, 11, 0.12);
+            --radius-xl: 28px;
+            --radius-lg: 20px;
+            --radius-md: 14px;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+            color: var(--ink);
+            background:
+                radial-gradient(circle at top left, rgba(255, 180, 95, 0.35), transparent 28%),
+                radial-gradient(circle at top right, rgba(36, 138, 118, 0.2), transparent 24%),
+                linear-gradient(180deg, #f9f1e1 0%, #efe5d3 54%, #ebe1d3 100%);
+        }
+
+        .page {
+            width: min(1180px, calc(100vw - 32px));
+            margin: 32px auto;
+            display: grid;
+            gap: 22px;
+        }
+
+        .hero {
+            padding: 28px;
+            border: 1px solid var(--line);
+            border-radius: var(--radius-xl);
+            background: linear-gradient(135deg, rgba(255, 250, 241, 0.96), rgba(250, 245, 236, 0.76));
+            box-shadow: var(--shadow);
+            overflow: hidden;
+            position: relative;
+        }
+
+        .hero::after {
+            content: "";
+            position: absolute;
+            inset: auto -80px -90px auto;
+            width: 240px;
+            height: 240px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(14, 124, 102, 0.18), transparent 70%);
+            pointer-events: none;
+        }
+
+        .eyebrow {
+            margin: 0 0 10px;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: var(--accent);
+        }
+
+        h1 {
+            margin: 0;
+            max-width: 780px;
+            font-family: Georgia, "Times New Roman", serif;
+            font-size: clamp(34px, 4vw, 56px);
+            line-height: 0.98;
+            letter-spacing: -0.04em;
+        }
+
+        .hero p {
+            margin: 16px 0 0;
+            max-width: 720px;
+            font-size: 16px;
+            line-height: 1.65;
+            color: var(--muted);
+        }
+
+        .shell {
+            display: grid;
+            grid-template-columns: minmax(300px, 420px) minmax(420px, 1fr);
+            gap: 22px;
+        }
+
+        .panel {
+            border: 1px solid var(--line);
+            border-radius: var(--radius-xl);
+            background: var(--panel);
+            backdrop-filter: blur(12px);
+            box-shadow: var(--shadow);
+        }
+
+        .panel-inner {
+            padding: 24px;
+        }
+
+        .panel-title {
+            margin: 0 0 8px;
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .panel-copy {
+            margin: 0 0 18px;
+            color: var(--muted);
+            line-height: 1.55;
+            font-size: 14px;
+        }
+
+        .dropzone {
+            position: relative;
+            display: grid;
+            place-items: center;
+            min-height: 220px;
+            padding: 20px;
+            border: 1.5px dashed rgba(14, 124, 102, 0.35);
+            border-radius: var(--radius-lg);
+            background:
+                linear-gradient(180deg, rgba(14, 124, 102, 0.05), rgba(14, 124, 102, 0.02)),
+                var(--panel-strong);
+            text-align: center;
+            transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+            cursor: pointer;
+        }
+
+        .dropzone.dragover {
+            transform: translateY(-2px);
+            border-color: var(--accent);
+            background:
+                linear-gradient(180deg, rgba(14, 124, 102, 0.11), rgba(14, 124, 102, 0.04)),
+                var(--panel-strong);
+        }
+
+        .dropzone-icon {
+            width: 64px;
+            height: 64px;
+            display: grid;
+            place-items: center;
+            border-radius: 18px;
+            background: var(--accent-soft);
+            color: var(--accent);
+            font-size: 28px;
+            font-weight: 700;
+        }
+
+        .dropzone strong {
+            display: block;
+            margin-top: 14px;
+            font-size: 17px;
+        }
+
+        .dropzone span {
+            display: block;
+            margin-top: 8px;
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        input[type="file"] {
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        .filename {
+            margin: 16px 0 0;
+            min-height: 22px;
+            font-size: 14px;
+            color: var(--muted);
+        }
+
+        .actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 18px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            border: 0;
+            border-radius: 999px;
+            padding: 13px 18px;
+            font: inherit;
+            font-weight: 700;
+            cursor: pointer;
+            transition: transform 140ms ease, opacity 140ms ease, background 140ms ease;
+        }
+
+        button:hover:not(:disabled) {
+            transform: translateY(-1px);
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .primary {
+            color: white;
+            background: linear-gradient(135deg, #0c7964, #0b5e61);
+        }
+
+        .secondary {
+            color: var(--ink);
+            background: rgba(255, 255, 255, 0.72);
+            border: 1px solid var(--line);
+        }
+
+        .status-rail {
+            display: grid;
+            gap: 12px;
+        }
+
+        .status-item {
+            display: grid;
+            grid-template-columns: 42px 1fr auto;
+            gap: 12px;
+            align-items: center;
+            padding: 14px 16px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.65);
+        }
+
+        .status-dot {
+            width: 42px;
+            height: 42px;
+            border-radius: 50%;
+            display: grid;
+            place-items: center;
+            font-size: 13px;
+            font-weight: 800;
+            color: var(--muted);
+            background: rgba(70, 53, 36, 0.08);
+        }
+
+        .status-item.active .status-dot {
+            color: white;
+            background: var(--warn);
+            animation: pulse 1.2s ease-in-out infinite;
+        }
+
+        .status-item.done .status-dot {
+            color: white;
+            background: var(--accent);
+        }
+
+        .status-item.failed .status-dot {
+            color: white;
+            background: var(--danger);
+        }
+
+        .status-label {
+            font-size: 15px;
+            font-weight: 700;
+        }
+
+        .status-meta {
+            margin-top: 3px;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .status-pill {
+            padding: 7px 10px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--muted);
+            background: rgba(46, 36, 26, 0.08);
+        }
+
+        .status-item.active .status-pill {
+            color: #8a4700;
+            background: rgba(209, 109, 54, 0.14);
+        }
+
+        .status-item.done .status-pill {
+            color: #0b5b4e;
+            background: rgba(14, 124, 102, 0.14);
+        }
+
+        .status-item.failed .status-pill {
+            color: #8f281d;
+            background: rgba(180, 63, 46, 0.13);
+        }
+
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .metric {
+            padding: 16px;
+            border: 1px solid var(--line);
+            border-radius: var(--radius-md);
+            background: rgba(255, 255, 255, 0.65);
+        }
+
+        .metric-label {
+            font-size: 11px;
+            letter-spacing: 0.11em;
+            text-transform: uppercase;
+            color: var(--muted);
+            font-weight: 800;
+        }
+
+        .metric-value {
+            margin-top: 10px;
+            font-size: 21px;
+            font-weight: 800;
+            line-height: 1.1;
+            word-break: break-word;
+        }
+
+        .result-stack {
+            display: grid;
+            gap: 18px;
+        }
+
+        .codebox {
+            margin-top: 14px;
+            padding: 14px 16px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--line);
+            background: rgba(28, 21, 14, 0.94);
+            color: #f5e8d7;
+            font-family: "IBM Plex Mono", Consolas, monospace;
+            font-size: 12px;
+            line-height: 1.65;
+            overflow: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .chunk-list {
+            display: grid;
+            gap: 12px;
+        }
+
+        .chunk-card {
+            padding: 16px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.72);
+        }
+
+        .chunk-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 8px;
+        }
+
+        .chunk-title {
+            font-weight: 800;
+            font-size: 14px;
+        }
+
+        .chunk-meta {
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .chunk-body,
+        .text-preview {
+            color: var(--ink);
+            font-size: 14px;
+            line-height: 1.7;
+            white-space: pre-wrap;
+        }
+
+        .callout {
+            padding: 14px 16px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.65);
+            font-size: 14px;
+            color: var(--muted);
+            line-height: 1.6;
+        }
+
+        .error {
+            color: var(--danger);
+        }
+
+        .empty {
+            padding: 22px;
+            border: 1px dashed var(--line);
+            border-radius: var(--radius-md);
+            color: var(--muted);
+            text-align: center;
+            background: rgba(255, 255, 255, 0.45);
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.08); }
+        }
+
+        @media (max-width: 960px) {
+            .shell {
+                grid-template-columns: 1fr;
+            }
+
+            .summary-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @media (max-width: 640px) {
+            .page {
+                width: min(100vw - 20px, 1180px);
+                margin: 10px auto 28px;
+            }
+
+            .hero,
+            .panel-inner {
+                padding: 18px;
+            }
+
+            .summary-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+<main class="page">
+    <section class="hero">
+        <p class="eyebrow">PDF Chatbot Demo</p>
+        <h1>Upload a PDF, then watch extraction and chunking complete in one pass.</h1>
+        <p>
+            This demo calls the existing backend upload pipeline. The page shows the live request state,
+            then renders extracted text and saved chunks after the server finishes processing.
+        </p>
+    </section>
+
+    <section class="shell">
+        <div class="panel">
+            <div class="panel-inner">
+                <h2 class="panel-title">Upload Flow</h2>
+                <p class="panel-copy">
+                    Drop a PDF here or browse from disk. The backend will store the file in MinIO, extract text,
+                    chunk it, and persist the results in PostgreSQL.
+                </p>
+
+                <label class="dropzone" id="dropzone">
+                    <div>
+                        <div class="dropzone-icon">PDF</div>
+                        <strong>Drop a PDF to start</strong>
+                        <span>or click to choose a file</span>
+                    </div>
+                    <input id="fileInput" type="file" accept="application/pdf,.pdf">
+                </label>
+
+                <div class="filename" id="filename">No file selected.</div>
+
+                <div class="actions">
+                    <button class="primary" id="uploadButton" disabled>Upload And Process</button>
+                    <button class="secondary" id="resetButton" type="button">Reset</button>
+                </div>
+
+                <div class="codebox" id="requestBox">POST /api/documents/upload</div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-inner result-stack">
+                <div>
+                    <h2 class="panel-title">Pipeline Status</h2>
+                    <p class="panel-copy">
+                        The backend returns after upload, extraction, and chunking are complete.
+                    </p>
+                    <div class="status-rail" id="statusRail">
+                        <div class="status-item" data-step="upload">
+                            <div class="status-dot">1</div>
+                            <div>
+                                <div class="status-label">Upload To MinIO</div>
+                                <div class="status-meta">Store the original PDF and capture metadata.</div>
+                            </div>
+                            <div class="status-pill">Waiting</div>
+                        </div>
+                        <div class="status-item" data-step="extract">
+                            <div class="status-dot">2</div>
+                            <div>
+                                <div class="status-label">Extract Text</div>
+                                <div class="status-meta">Read pages with <code>pypdf</code> and save raw text.</div>
+                            </div>
+                            <div class="status-pill">Waiting</div>
+                        </div>
+                        <div class="status-item" data-step="chunk">
+                            <div class="status-dot">3</div>
+                            <div>
+                                <div class="status-label">Chunk Content</div>
+                                <div class="status-meta">Split extracted text into retrieval-ready chunks.</div>
+                            </div>
+                            <div class="status-pill">Waiting</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <h2 class="panel-title">Result Summary</h2>
+                    <div class="summary-grid" id="summaryGrid">
+                        <div class="metric">
+                            <div class="metric-label">Status</div>
+                            <div class="metric-value" id="metricStatus">Idle</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">Pages</div>
+                            <div class="metric-value" id="metricPages">-</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">Chunks</div>
+                            <div class="metric-value" id="metricChunks">-</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">File Size</div>
+                            <div class="metric-value" id="metricSize">-</div>
+                        </div>
+                    </div>
+                    <div class="codebox" id="responseBox">Waiting for upload.</div>
+                </div>
+
+                <div>
+                    <h2 class="panel-title">Extracted Text</h2>
+                    <div class="empty" id="textPreview">Upload a PDF to see extracted text here.</div>
+                </div>
+
+                <div>
+                    <h2 class="panel-title">Chunks</h2>
+                    <div class="empty" id="chunkList">No chunks yet.</div>
+                </div>
+            </div>
+        </div>
+    </section>
+</main>
+
+<script>
+    const fileInput = document.getElementById("fileInput");
+    const dropzone = document.getElementById("dropzone");
+    const filename = document.getElementById("filename");
+    const uploadButton = document.getElementById("uploadButton");
+    const resetButton = document.getElementById("resetButton");
+    const responseBox = document.getElementById("responseBox");
+    const requestBox = document.getElementById("requestBox");
+    const textPreview = document.getElementById("textPreview");
+    const chunkList = document.getElementById("chunkList");
+
+    const metricStatus = document.getElementById("metricStatus");
+    const metricPages = document.getElementById("metricPages");
+    const metricChunks = document.getElementById("metricChunks");
+    const metricSize = document.getElementById("metricSize");
+
+    const stepElements = {
+        upload: document.querySelector('[data-step="upload"]'),
+        extract: document.querySelector('[data-step="extract"]'),
+        chunk: document.querySelector('[data-step="chunk"]'),
+    };
+
+    let phaseTimers = [];
+    let selectedFile = null;
+
+    function bytesToLabel(size) {
+        if (!size && size !== 0) return "-";
+        const units = ["B", "KB", "MB", "GB"];
+        let value = size;
+        let index = 0;
+        while (value >= 1024 && index < units.length - 1) {
+            value /= 1024;
+            index += 1;
+        }
+        return `${value.toFixed(value >= 10 || index === 0 ? 0 : 1)} ${units[index]}`;
+    }
+
+    function clearTimers() {
+        for (const timer of phaseTimers) {
+            window.clearTimeout(timer);
+        }
+        phaseTimers = [];
+    }
+
+    function setStepState(stepName, state, label) {
+        const element = stepElements[stepName];
+        if (!element) return;
+        element.classList.remove("active", "done", "failed");
+        if (state) {
+            element.classList.add(state);
+        }
+        element.querySelector(".status-pill").textContent = label;
+    }
+
+    function resetSteps() {
+        setStepState("upload", "", "Waiting");
+        setStepState("extract", "", "Waiting");
+        setStepState("chunk", "", "Waiting");
+    }
+
+    function beginPhases() {
+        clearTimers();
+        resetSteps();
+        setStepState("upload", "active", "Running");
+        phaseTimers.push(window.setTimeout(() => {
+            setStepState("upload", "done", "Done");
+            setStepState("extract", "active", "Running");
+        }, 700));
+        phaseTimers.push(window.setTimeout(() => {
+            setStepState("extract", "done", "Done");
+            setStepState("chunk", "active", "Running");
+        }, 1700));
+    }
+
+    function finishSuccess() {
+        clearTimers();
+        setStepState("upload", "done", "Done");
+        setStepState("extract", "done", "Done");
+        setStepState("chunk", "done", "Done");
+    }
+
+    function finishFailure(message) {
+        clearTimers();
+        const activeStep = Object.entries(stepElements).find(([, element]) => element.classList.contains("active"));
+        if (activeStep) {
+            setStepState(activeStep[0], "failed", "Failed");
+        } else {
+            setStepState("upload", "failed", "Failed");
+        }
+        metricStatus.textContent = "Failed";
+        responseBox.textContent = message;
+        responseBox.classList.add("error");
+    }
+
+    function resetResultPanels() {
+        responseBox.classList.remove("error");
+        responseBox.textContent = "Waiting for upload.";
+        textPreview.className = "empty";
+        textPreview.textContent = "Upload a PDF to see extracted text here.";
+        chunkList.className = "empty";
+        chunkList.textContent = "No chunks yet.";
+        metricStatus.textContent = "Idle";
+        metricPages.textContent = "-";
+        metricChunks.textContent = "-";
+        metricSize.textContent = "-";
+    }
+
+    function resetAll() {
+        selectedFile = null;
+        fileInput.value = "";
+        filename.textContent = "No file selected.";
+        uploadButton.disabled = true;
+        requestBox.textContent = "POST /api/documents/upload";
+        clearTimers();
+        resetSteps();
+        resetResultPanels();
+    }
+
+    function updateSelectedFile(file = fileInput.files[0] || null) {
+        selectedFile = file;
+        if (!file) {
+            filename.textContent = "No file selected.";
+            uploadButton.disabled = true;
+            requestBox.textContent = "POST /api/documents/upload";
+            return;
+        }
+        filename.textContent = `${file.name} • ${bytesToLabel(file.size)}`;
+        uploadButton.disabled = false;
+        requestBox.textContent = `POST /api/documents/upload\nfile=${file.name}`;
+    }
+
+    async function fetchDerivedData(documentId) {
+        const [contentResponse, chunkResponse] = await Promise.all([
+            fetch("/api/document-contents/?limit=200"),
+            fetch("/api/document-chunks/?limit=200"),
+        ]);
+
+        const contents = contentResponse.ok ? await contentResponse.json() : [];
+        const chunks = chunkResponse.ok ? await chunkResponse.json() : [];
+
+        const documentContent = contents.find((item) => item.document_id === documentId);
+        const documentChunks = chunks
+            .filter((item) => item.document_id === documentId)
+            .sort((left, right) => left.chunk_index - right.chunk_index);
+
+        if (documentContent) {
+            const preview = documentContent.raw_text.length > 1800
+                ? `${documentContent.raw_text.slice(0, 1800)}...`
+                : documentContent.raw_text;
+            textPreview.className = "text-preview";
+            textPreview.textContent = preview;
+        } else {
+            textPreview.className = "empty";
+            textPreview.textContent = "No extracted text record was returned.";
+        }
+
+        if (!documentChunks.length) {
+            chunkList.className = "empty";
+            chunkList.textContent = "No chunks returned for this document.";
+            return;
+        }
+
+        chunkList.className = "chunk-list";
+        chunkList.innerHTML = documentChunks.map((chunk) => {
+            const preview = chunk.content.length > 360 ? `${chunk.content.slice(0, 360)}...` : chunk.content;
+            return `
+                <article class="chunk-card">
+                    <div class="chunk-head">
+                        <div class="chunk-title">Chunk #${chunk.chunk_index}</div>
+                        <div class="chunk-meta">page ${chunk.page_from ?? "-"} • ${chunk.character_count ?? 0} chars • ${chunk.token_count ?? 0} tokens</div>
+                    </div>
+                    <div class="chunk-body">${escapeHtml(preview)}</div>
+                </article>
+            `;
+        }).join("");
+    }
+
+    function escapeHtml(value) {
+        return value
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;");
+    }
+
+    async function handleUpload() {
+        const file = selectedFile;
+        if (!file) return;
+
+        uploadButton.disabled = true;
+        responseBox.classList.remove("error");
+        responseBox.textContent = "Uploading file and waiting for extraction + chunking to finish...";
+        metricStatus.textContent = "Running";
+        metricPages.textContent = "-";
+        metricChunks.textContent = "-";
+        metricSize.textContent = bytesToLabel(file.size);
+        textPreview.className = "empty";
+        textPreview.textContent = "Backend is processing the file...";
+        chunkList.className = "empty";
+        chunkList.textContent = "Chunks will appear after processing completes.";
+        beginPhases();
+
+        const payload = new FormData();
+        payload.append("file", file);
+
+        try {
+            const response = await fetch("/api/documents/upload", {
+                method: "POST",
+                body: payload,
+            });
+
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data.detail || "Upload failed.");
+            }
+
+            finishSuccess();
+            metricStatus.textContent = data.status || "processed";
+            metricPages.textContent = String(data.total_pages ?? "-");
+            metricChunks.textContent = String(data.total_chunks ?? "-");
+            metricSize.textContent = bytesToLabel(data.file_size_bytes);
+            responseBox.textContent = JSON.stringify(data, null, 2);
+            await fetchDerivedData(data.id);
+        } catch (error) {
+            finishFailure(error.message || "Upload failed.");
+            textPreview.className = "callout error";
+            textPreview.textContent = error.message || "Upload failed.";
+            chunkList.className = "empty";
+            chunkList.textContent = "No chunks available.";
+        } finally {
+            uploadButton.disabled = !selectedFile;
+        }
+    }
+
+    dropzone.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        dropzone.classList.add("dragover");
+    });
+
+    dropzone.addEventListener("dragleave", () => {
+        dropzone.classList.remove("dragover");
+    });
+
+    dropzone.addEventListener("drop", (event) => {
+        event.preventDefault();
+        dropzone.classList.remove("dragover");
+        if (!event.dataTransfer.files.length) return;
+        updateSelectedFile(event.dataTransfer.files[0]);
+    });
+
+    fileInput.addEventListener("change", () => updateSelectedFile());
+    uploadButton.addEventListener("click", handleUpload);
+    resetButton.addEventListener("click", resetAll);
+    resetAll();
+    window.escapeHtml = escapeHtml;
+</script>
+</body>
+</html>

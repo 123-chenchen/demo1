@@ -17,6 +17,16 @@ class Settings(BaseSettings):
     postgres_password: str = "postgres"
     database_url: str | None = None
     qdrant_url: str = "http://localhost:6333"
+    qdrant_collection_name: str = "document_chunks"
+    minio_endpoint: str = "localhost:9000"
+    minio_access_key: str = "minioadmin"
+    minio_secret_key: str = "minioadmin"
+    minio_bucket: str = "pdf-documents"
+    minio_secure: bool = False
+    document_chunk_size: int = 1000
+    document_chunk_overlap: int = 200
+    embedding_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
+    embedding_batch_size: int = 32
 
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),

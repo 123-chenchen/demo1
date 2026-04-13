@@ -14,4 +14,6 @@ demo1/
 Compose hien tai chay:
 
 - `postgres`
+- `minio`
+- `qdrant`
 - `backend` FastAPI tai `http://127.0.0.1:8000`
