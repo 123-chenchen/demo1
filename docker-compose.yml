@@ -45,6 +45,15 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
 
+  ollama:
+    image: ollama/ollama:latest
+    container_name: pdf-chatbot-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
   backend:
     build:
       context: ./backend
@@ -57,6 +66,8 @@ services:
       minio:
         condition: service_started
       qdrant:
+        condition: service_started
+      ollama:
         condition: service_started
     environment:
       API_HOST: 0.0.0.0
@@ -74,10 +85,17 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
       MINIO_BUCKET: ${MINIO_BUCKET:-pdf-documents}
       MINIO_SECURE: ${MINIO_SECURE:-false}
-      DOCUMENT_CHUNK_SIZE: ${DOCUMENT_CHUNK_SIZE:-1000}
+      DOCUMENT_CHUNK_SIZE: ${DOCUMENT_CHUNK_SIZE:-1000} #512
       DOCUMENT_CHUNK_OVERLAP: ${DOCUMENT_CHUNK_OVERLAP:-200}
       EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME:-sentence-transformers/all-MiniLM-L6-v2}
       EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-32}
+      RETRIEVAL_TOP_K: ${RETRIEVAL_TOP_K:-5}
+      CHAT_PROVIDER: ${CHAT_PROVIDER:-ollama}
+      CHAT_TEMPERATURE: ${CHAT_TEMPERATURE:-0.1}
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL_NAME: ${OLLAMA_MODEL_NAME:-qwen2.5:7b-instruct}
+      GOOGLE_MODEL_NAME: ${GOOGLE_MODEL_NAME:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
     ports:
       - "8000:8000"
     volumes:
@@ -98,4 +116,5 @@ volumes:
   postgres_data:
   minio_data:
   qdrant_data:
+  ollama_data:
   hf_cache:

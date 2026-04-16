@@ -58,6 +58,7 @@ Chay bang Docker Compose:
 ```bash
 cp .env.example .env
 docker compose up -d --build
+docker exec -it pdf-chatbot-ollama ollama pull qwen2.5:7b-instruct
 ```
 
 Chay backend local khong dung compose:
@@ -96,10 +97,12 @@ Neu chay bang Docker Compose, service `backend` se tu dong:
 - cho `postgres` healthy
 - cho `minio` start xong
 - cho `qdrant` start xong
+- cho `ollama` start xong
 - chay `alembic upgrade head`
 - mo FastAPI o cong `8000`
 
 Compose noi backend truc tiep vao service `qdrant` qua `http://qdrant:6333`. Neu chay backend local tren may host thi co the giu `QDRANT_URL=http://localhost:6333`.
+Trong Docker Compose, backend goi Ollama qua `http://ollama:11434`.
 
 ## CRUD API
 
@@ -117,6 +120,9 @@ Tat ca endpoint CRUD nam duoi prefix `/api`.
 - `GET/PATCH/DELETE /api/document-contents/{item_id}`
 - `GET/POST /api/document-chunks`
 - `GET/PATCH/DELETE /api/document-chunks/{item_id}`
+- `GET /api/rag/config`
+- `POST /api/rag/chat`
+- `POST /api/rag/reindex`
 - `GET/POST /api/chat-sessions`
 - `GET/PATCH/DELETE /api/chat-sessions/{item_id}`
 - `GET/POST /api/chat-messages`
@@ -129,8 +135,10 @@ Ghi chu:
 - `POST /api/users` nhan `password` va backend se hash thanh `password_hash`.
 - `POST /api/refresh-tokens` nhan `token_value` va backend se hash thanh `token_hash`.
 - `POST /api/documents/upload` nhan file PDF `multipart/form-data`, upload len MinIO, extract text bang `pypdf`, chunk text, roi tao/cap nhat `documents`, `document_contents`, `document_chunks`.
-- Sau khi chunk xong, backend tao embedding bang `sentence-transformers/all-MiniLM-L6-v2` va upsert vector vao Qdrant collection `document_chunks`.
+- Sau khi chunk xong, backend tao embedding bang `sentence-transformers/all-MiniLM-L6-v2` qua `LangChain HuggingFaceEmbeddings` va upsert vao `Qdrant` collection `document_chunks`.
 - `POST /api/documents/{document_id}/ingest` cho phep chay lai buoc extract + chunk + embedding cho tai lieu da upload.
+- `POST /api/rag/chat` dung 1 pipeline RAG nhe: `LangChain basic + Qdrant + all-MiniLM-L6-v2`.
+- `POST /api/rag/reindex` rebuild toan bo vector trong Qdrant theo payload LangChain hien tai. Nen chay 1 lan neu da co vector cu.
 - Danh sach endpoint ho tro `skip` va `limit`.
 
 ## Bien moi truong
@@ -155,4 +163,24 @@ DOCUMENT_CHUNK_SIZE=1000
 DOCUMENT_CHUNK_OVERLAP=200
 EMBEDDING_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
 EMBEDDING_BATCH_SIZE=32
+RETRIEVAL_TOP_K=5
+CHAT_PROVIDER=ollama
+CHAT_TEMPERATURE=0.1
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL_NAME=qwen2.5:7b-instruct
+GOOGLE_MODEL_NAME=
+GOOGLE_API_KEY=
+```
+
+Mac dinh backend se goi Ollama voi model `qwen2.5:7b-instruct`, tuong ung voi `Qwen/Qwen2.5-7B-Instruct`.
+Neu chay bang Docker Compose, pull model vao container:
+
+```bash
+docker exec -it pdf-chatbot-ollama ollama pull qwen2.5:7b-instruct
+```
+
+Neu khong dung Docker cho Ollama, pull tren host:
+
+```bash
+ollama pull qwen2.5:7b-instruct
 ```

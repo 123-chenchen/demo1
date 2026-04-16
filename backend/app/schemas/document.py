@@ -14,7 +14,6 @@ class DocumentCreate(AppSchema):
     original_file_name: str
     mime_type: str = "application/pdf"
     file_size_bytes: int | None = None
-    checksum_sha256: str | None = None
     total_pages: int | None = None
     total_chunks: int = 0
     status: DocumentStatus = DocumentStatus.pending
@@ -26,7 +25,6 @@ class DocumentUpdate(AppSchema):
     original_file_name: str | None = None
     mime_type: str | None = None
     file_size_bytes: int | None = None
-    checksum_sha256: str | None = None
     total_pages: int | None = None
     total_chunks: int | None = None
     status: DocumentStatus | None = None
@@ -39,7 +37,6 @@ class DocumentRead(AppSchema):
     original_file_name: str
     mime_type: str
     file_size_bytes: int | None = None
-    checksum_sha256: str | None = None
     total_pages: int | None = None
     total_chunks: int
     status: DocumentStatus

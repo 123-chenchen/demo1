@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import re
 import uuid
 from datetime import datetime, timezone
@@ -10,7 +9,6 @@ from typing import BinaryIO
 from fastapi import UploadFile
 from minio.error import S3Error
 from pypdf.errors import PdfReadError
-from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -51,28 +49,26 @@ def _build_object_name(original_file_name: str) -> str:
     return f"documents/{date_prefix}/{uuid.uuid4()}-{safe_stem}.pdf"
 
 
-def _inspect_pdf(file_obj: BinaryIO) -> tuple[int, str]:
+def _inspect_pdf(file_obj: BinaryIO) -> int:
     file_obj.seek(0)
     signature = file_obj.read(len(PDF_SIGNATURE))
     if signature != PDF_SIGNATURE:
         raise DocumentUploadValidationError("Only valid PDF files are supported.")
 
     file_obj.seek(0)
-    hasher = hashlib.sha256()
     file_size_bytes = 0
 
     while True:
         chunk = file_obj.read(READ_CHUNK_SIZE)
         if not chunk:
             break
-        hasher.update(chunk)
         file_size_bytes += len(chunk)
 
     if file_size_bytes == 0:
         raise DocumentUploadValidationError("Uploaded PDF is empty.")
 
     file_obj.seek(0)
-    return file_size_bytes, hasher.hexdigest()
+    return file_size_bytes
 
 
 def _extract_page_count(file_obj: BinaryIO) -> int | None:
@@ -92,18 +88,13 @@ def _extract_page_count(file_obj: BinaryIO) -> int | None:
 class DocumentUploadService:
     def upload_pdf(self, db: Session, *, upload_file: UploadFile) -> Document:
         original_file_name = _normalize_filename(upload_file.filename)
+        print(f"Starting upload of {original_file_name} with content type {upload_file.content_type}")
         if Path(original_file_name).suffix.lower() != ".pdf":
             raise DocumentUploadValidationError("Only .pdf files can be uploaded.")
 
         file_obj = upload_file.file
-        file_size_bytes, checksum_sha256 = _inspect_pdf(file_obj)
+        file_size_bytes = _inspect_pdf(file_obj)
         total_pages = _extract_page_count(file_obj)
-
-        existing_document = db.scalar(
-            select(Document).where(Document.checksum_sha256 == checksum_sha256)
-        )
-        if existing_document is not None:
-            raise DocumentUploadConflictError("This PDF already exists in storage.")
 
         settings = get_settings()
         object_name = _build_object_name(original_file_name)
@@ -127,7 +118,6 @@ class DocumentUploadService:
             original_file_name=original_file_name,
             mime_type="application/pdf",
             file_size_bytes=file_size_bytes,
-            checksum_sha256=checksum_sha256,
             total_pages=total_pages,
             total_chunks=0,
             status=DocumentStatus.pending,

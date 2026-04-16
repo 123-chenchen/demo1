@@ -28,7 +28,6 @@ class Document(TimestampMixin, Base):
         server_default=text("'application/pdf'"),
     )
     file_size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    checksum_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
     total_pages: Mapped[int | None] = mapped_column(Integer, nullable=True)
     total_chunks: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     status: Mapped[DocumentStatus] = mapped_column(

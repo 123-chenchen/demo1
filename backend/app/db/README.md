@@ -85,7 +85,6 @@ Moi file tai len la mot record.
 | `original_file_name` | `varchar(255)` | No |  | Ten file goc nguoi dung upload |
 | `mime_type` | `varchar(100)` | No | default `application/pdf` | Loai file |
 | `file_size_bytes` | `bigint` | Yes |  | Kich thuoc file |
-| `checksum_sha256` | `varchar(64)` | Yes | Unique | Hash file de detect duplicate |
 | `total_pages` | `integer` | Yes |  | So trang cua tai lieu |
 | `total_chunks` | `integer` | No | default `0` | Tong so chunks sau khi chunk |
 | `status` | `document_status` | No | default `pending` | Trang thai pipeline xu ly |

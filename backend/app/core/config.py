@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     document_chunk_overlap: int = 200
     embedding_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_batch_size: int = 32
+    retrieval_top_k: int = 5
+    chat_provider: str = "ollama"
+    chat_temperature: float = 0.1
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model_name: str | None = "llama3"
+    google_api_key: str | None = None
+    google_model_name: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),

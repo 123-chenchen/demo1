@@ -8,6 +8,7 @@ from app.api.routers.documents import (
     document_upload_router,
     documents_router,
 )
+from app.api.routers.rag import rag_router
 
 api_router = APIRouter()
 api_router.include_router(users_router)
@@ -19,3 +20,4 @@ api_router.include_router(document_chunks_router)
 api_router.include_router(chat_sessions_router)
 api_router.include_router(chat_messages_router)
 api_router.include_router(message_sources_router)
+api_router.include_router(rag_router)

@@ -2,12 +2,19 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from functools import lru_cache
+from uuid import UUID
 
+from langchain_core.documents import Document as LangChainDocument
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient, models
 from sentence_transformers import SentenceTransformer
 
 from app.core.config import get_settings
 from app.db.models import Document, DocumentChunk
+
+LANGCHAIN_CONTENT_KEY = "page_content"
+LANGCHAIN_METADATA_KEY = "metadata"
 
 
 class VectorStoreError(Exception):
@@ -28,6 +35,24 @@ def get_embedding_model() -> SentenceTransformer:
     except Exception as exc:
         raise VectorStoreError(
             f"Could not load embedding model '{settings.embedding_model_name}'."
+        ) from exc
+
+
+@lru_cache
+def get_langchain_embeddings() -> HuggingFaceEmbeddings:
+    settings = get_settings()
+    try:
+        return HuggingFaceEmbeddings(
+            model_name=settings.embedding_model_name,
+            encode_kwargs={
+                "batch_size": settings.embedding_batch_size,
+                "normalize_embeddings": True,
+            },
+            show_progress=False,
+        )
+    except Exception as exc:
+        raise VectorStoreError(
+            f"Could not initialize LangChain embeddings for '{settings.embedding_model_name}'."
         ) from exc
 
 
@@ -84,24 +109,36 @@ def ensure_collection() -> None:
         raise VectorStoreError("Could not initialize the Qdrant collection.") from exc
 
 
-def embed_texts(texts: Sequence[str]) -> list[list[float]]:
-    if not texts:
-        return []
-
+@lru_cache
+def get_vector_store() -> QdrantVectorStore:
     settings = get_settings()
+    ensure_collection()
 
     try:
-        vectors = get_embedding_model().encode(
-            list(texts),
-            batch_size=settings.embedding_batch_size,
-            show_progress_bar=False,
-            normalize_embeddings=True,
-            convert_to_numpy=True,
+        return QdrantVectorStore(
+            client=get_qdrant_client(),
+            collection_name=settings.qdrant_collection_name,
+            embedding=get_langchain_embeddings(),
+            content_payload_key=LANGCHAIN_CONTENT_KEY,
+            metadata_payload_key=LANGCHAIN_METADATA_KEY,
         )
     except Exception as exc:
-        raise VectorStoreError("Could not create embeddings for document chunks.") from exc
+        raise VectorStoreError("Could not initialize LangChain Qdrant vector store.") from exc
 
-    return vectors.tolist()
+
+def _build_payload_metadata(document: Document, chunk: DocumentChunk) -> dict[str, object]:
+    return {
+        "chunk_id": str(chunk.id),
+        "document_id": str(document.id),
+        "chunk_index": chunk.chunk_index,
+        "page_from": chunk.page_from,
+        "page_to": chunk.page_to,
+        "storage_key": document.storage_key,
+        "original_file_name": document.original_file_name,
+        "token_count": chunk.token_count,
+        "character_count": chunk.character_count,
+        "embedding_model": get_settings().embedding_model_name,
+    }
 
 
 def upsert_document_chunks(*, document: Document, chunks: Sequence[DocumentChunk]) -> None:
@@ -110,10 +147,11 @@ def upsert_document_chunks(*, document: Document, chunks: Sequence[DocumentChunk
 
     settings = get_settings()
     ensure_collection()
-    vectors = embed_texts([chunk.content for chunk in chunks])
 
-    points = []
-    for chunk, vector in zip(chunks, vectors, strict=True):
+    documents: list[LangChainDocument] = []
+    point_ids: list[str] = []
+
+    for chunk in chunks:
         point_id = chunk.qdrant_point_id or str(chunk.id)
         chunk.qdrant_point_id = point_id
         chunk.embedding_model = settings.embedding_model_name
@@ -123,39 +161,55 @@ def upsert_document_chunks(*, document: Document, chunks: Sequence[DocumentChunk
             {
                 "embedding_model": settings.embedding_model_name,
                 "qdrant_collection": settings.qdrant_collection_name,
-                "vector_size": len(vector),
+                "vector_size": get_embedding_dimension(),
             }
         )
         chunk.extra_metadata = metadata
 
-        points.append(
-            models.PointStruct(
-                id=point_id,
-                vector=vector,
-                payload={
-                    "document_id": str(document.id),
-                    "chunk_id": str(chunk.id),
-                    "chunk_index": chunk.chunk_index,
-                    "page_from": chunk.page_from,
-                    "page_to": chunk.page_to,
-                    "storage_key": document.storage_key,
-                    "original_file_name": document.original_file_name,
-                    "content": chunk.content,
-                    "token_count": chunk.token_count,
-                    "character_count": chunk.character_count,
-                    "embedding_model": settings.embedding_model_name,
-                },
+        documents.append(
+            LangChainDocument(
+                page_content=chunk.content,
+                metadata=_build_payload_metadata(document, chunk),
             )
         )
+        point_ids.append(point_id)
 
     try:
-        get_qdrant_client().upsert(
-            collection_name=settings.qdrant_collection_name,
-            wait=True,
-            points=points,
-        )
+        get_vector_store().add_documents(documents=documents, ids=point_ids)
     except Exception as exc:
         raise VectorStoreError("Could not store document chunk vectors in Qdrant.") from exc
+
+
+def build_document_filter(document_id: UUID | None) -> models.Filter | None:
+    if document_id is None:
+        return None
+
+    return models.Filter(
+        must=[
+            models.FieldCondition(
+                key=f"{LANGCHAIN_METADATA_KEY}.document_id",
+                match=models.MatchValue(value=str(document_id)),
+            )
+        ]
+    )
+
+
+def similarity_search(
+    *,
+    query: str,
+    limit: int,
+    document_id: UUID | None = None,
+) -> list[tuple[LangChainDocument, float]]:
+    ensure_collection()
+
+    try:
+        return get_vector_store().similarity_search_with_score(
+            query=query,
+            k=limit,
+            filter=build_document_filter(document_id),
+        )
+    except Exception as exc:
+        raise VectorStoreError("Could not retrieve document chunks from Qdrant.") from exc
 
 
 def delete_points(point_ids: Sequence[str]) -> None:
@@ -173,3 +227,21 @@ def delete_points(point_ids: Sequence[str]) -> None:
         )
     except Exception as exc:
         raise VectorStoreError("Could not delete old document chunk vectors from Qdrant.") from exc
+
+
+def reset_collection() -> None:
+    settings = get_settings()
+    client = get_qdrant_client()
+
+    try:
+        if client.collection_exists(settings.qdrant_collection_name):
+            client.delete_collection(settings.qdrant_collection_name)
+        client.create_collection(
+            collection_name=settings.qdrant_collection_name,
+            vectors_config=models.VectorParams(
+                size=get_embedding_dimension(),
+                distance=models.Distance.COSINE,
+            ),
+        )
+    except Exception as exc:
+        raise VectorStoreError("Could not reset the Qdrant collection.") from exc
