@@ -6,10 +6,9 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Respon
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user, get_current_user_optional, get_db
-from app.crud import CrudConflictError, document_chunk_crud, document_content_crud, document_crud
+from app.crud import CrudConflictError, document_content_crud, document_crud
 from app.db.models import User
 from app.schemas import (
-    DocumentChunkRead,
     DocumentContentRead,
     DocumentRead,
     DocumentUpdate,
@@ -26,7 +25,6 @@ from app.services.auth import AuthNotFoundError, auth_service
 document_upload_router = APIRouter(prefix="/documents", tags=["documents"])
 documents_router = APIRouter(prefix="/documents", tags=["documents"])
 document_contents_router = APIRouter(prefix="/document-contents", tags=["document-contents"])
-document_chunks_router = APIRouter(prefix="/document-chunks", tags=["document-chunks"])
 
 
 def _resolve_selected_notebook_id(
@@ -266,60 +264,3 @@ def get_document_content(
     if content is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document content not found.")
     return content
-
-
-@document_chunks_router.get("/", response_model=list[DocumentChunkRead], response_model_by_alias=False)
-def list_document_chunks(
-    notebook_id: UUID | None = Query(default=None),
-    document_id: UUID | None = None,
-    skip: int = Query(default=0, ge=0),
-    limit: int = Query(default=100, ge=1, le=500),
-    db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_current_user_optional),
-) -> list[object]:
-    if current_user is None:
-        return document_chunk_crud.list_for_scope(
-            db,
-            notebook_id=None,
-            document_id=document_id,
-            skip=skip,
-            limit=limit,
-        )
-
-    return document_chunk_crud.list_for_user(
-        db,
-        user_id=current_user.id,
-        notebook_id=_resolve_selected_notebook_id(
-            db,
-            current_user=current_user,
-            notebook_id=notebook_id,
-        ),
-        document_id=document_id,
-        skip=skip,
-        limit=limit,
-    )
-
-
-@document_chunks_router.get("/{item_id}", response_model=DocumentChunkRead, response_model_by_alias=False)
-def get_document_chunk(
-    item_id: UUID,
-    notebook_id: UUID | None = Query(default=None),
-    db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_current_user_optional),
-) -> object:
-    if current_user is None:
-        chunk = document_chunk_crud.get_for_scope(
-            db,
-            obj_id=item_id,
-            notebook_id=None,
-        )
-    else:
-        chunk = document_chunk_crud.get_for_user(
-            db,
-            obj_id=item_id,
-            user_id=current_user.id,
-            notebook_id=notebook_id,
-        )
-    if chunk is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document chunk not found.")
-    return chunk

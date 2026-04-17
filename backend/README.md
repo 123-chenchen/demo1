@@ -127,11 +127,6 @@ Auth flow moi:
 - `POST /api/documents/{document_id}/ingest`
 - `GET /api/document-contents`
 - `GET /api/document-contents/{item_id}`
-- `GET /api/document-chunks`
-- `GET /api/document-chunks/{item_id}`
-- `GET /api/rag/config`
-- `POST /api/rag/chat`
-- `POST /api/rag/reindex`
 - `GET/POST /api/chat-sessions`
 - `GET/PATCH/DELETE /api/chat-sessions/{item_id}`
 
@@ -145,14 +140,14 @@ Ghi chu:
 - `POST /api/auth/forgot-password/verify` verify OTP reset, hash mat khau moi va revoke refresh token cu.
 - `refresh_tokens` duoc xu ly noi bo trong auth service, khong expose CRUD API cong khai.
 - `users` la bang noi bo phuc vu auth va lien ket du lieu, khong con expose CRUD API cong khai.
+- `document_chunks` la du lieu noi bo phuc vu retrieval va khong con expose router public.
+- `rag` la flow noi bo phuc vu retrieval/chat va khong con expose router public.
 - `GET/POST/PATCH /api/notebooks*` cho phep user liet ke, tao va sua cac notebook cua chinh minh.
 - `documents`, `document_contents`, `document_chunks` va `chat_sessions` deu duoc scope theo notebook. User da dang nhap chi thay du lieu trong notebook duoc chon cua minh; request khong auth chi thay du lieu public khong gan notebook.
-- Cac endpoint co chon notebook (`documents`, `chat-sessions`, `rag/chat`) deu nhan `notebook_id` tuy chon. Neu bo trong, backend se dung notebook mac dinh cua user cho cac flow can tao du lieu moi.
+- Cac endpoint co chon notebook (`documents`, `chat-sessions`) deu nhan `notebook_id` tuy chon. Neu bo trong, backend se dung notebook mac dinh cua user cho cac flow can tao du lieu moi.
 - `POST /api/documents/upload` nhan file PDF `multipart/form-data`, upload len MinIO, extract text bang `pypdf`, chunk text, roi tao/cap nhat `documents`, `document_contents`, `document_chunks`. Neu co access token thi document se duoc gan vao notebook duoc chon hoac notebook mac dinh.
 - Sau khi chunk xong, backend tao embedding bang `sentence-transformers/all-MiniLM-L6-v2` qua `LangChain HuggingFaceEmbeddings` va upsert vao `Qdrant` collection `document_chunks`.
 - `POST /api/documents/{document_id}/ingest` cho phep chay lai buoc extract + chunk + embedding cho tai lieu da upload trong scope hien tai.
-- `POST /api/rag/chat` dung 1 pipeline RAG nhe: `LangChain basic + Qdrant + all-MiniLM-L6-v2`. Request JSON co the gui `notebook_id`; neu khong gui va cung khong chi ro `document_id`/`session_id`, retrieval mac dinh chi tim trong notebook mac dinh cua user hien tai.
-- `POST /api/rag/reindex` rebuild toan bo vector trong Qdrant theo payload LangChain hien tai. Nen chay 1 lan neu da co vector cu.
 - Danh sach endpoint ho tro `skip` va `limit`.
 
 ## Bien moi truong

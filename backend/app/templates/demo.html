@@ -568,7 +568,7 @@
         <h1>Upload a PDF, then watch extraction and chunking complete in one pass.</h1>
         <p>
             This demo calls the existing backend upload pipeline. The page shows the live request state,
-            then renders extracted text and saved chunks after the server finishes processing.
+            then renders extracted text and a chunk summary after the server finishes processing.
         </p>
     </section>
 
@@ -664,60 +664,13 @@
                 </div>
 
                 <div>
-                    <h2 class="panel-title">Chunks</h2>
-                    <div class="empty" id="chunkList">No chunks yet.</div>
+                    <h2 class="panel-title">Chunk Summary</h2>
+                    <div class="empty" id="chunkList">No chunk summary yet.</div>
                 </div>
             </div>
         </div>
     </section>
 
-    <section class="chat-shell">
-        <div class="panel">
-            <div class="panel-inner">
-                <h2 class="panel-title">Ask The PDF</h2>
-                <p class="panel-copy">
-                    After one PDF is processed, ask the RAG pipeline a grounded question about that document.
-                </p>
-
-                <div class="chat-form">
-                    <textarea
-                        id="chatInput"
-                        class="chat-input"
-                        placeholder="Example: Summarize the document in 3 concise points."
-                        disabled
-                    ></textarea>
-
-                    <div class="actions">
-                        <button class="primary" id="askButton" type="button" disabled>Ask RAG</button>
-                        <button class="secondary" id="clearChatButton" type="button">Clear Answer</button>
-                    </div>
-
-                    <div class="codebox" id="chatRequestBox">POST /api/rag/chat</div>
-
-                    <div class="chat-meta">
-                        <div class="query-chip" id="chatTarget">No processed document selected</div>
-                        <div class="chat-note" id="chatStatus">
-                            Upload one PDF first. The demo will send its <code>document_id</code> to <code>/api/rag/chat</code>.
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="panel">
-            <div class="panel-inner result-stack">
-                <div>
-                    <h2 class="panel-title">Answer</h2>
-                    <div class="chat-answer" id="chatAnswer">The answer will appear here after you ask a question.</div>
-                </div>
-
-                <div>
-                    <h2 class="panel-title">Retrieved Sources</h2>
-                    <div class="empty" id="chatSources">No retrieval results yet.</div>
-                </div>
-            </div>
-        </div>
-    </section>
 </main>
 
 <script>
@@ -730,14 +683,6 @@
     const requestBox = document.getElementById("requestBox");
     const textPreview = document.getElementById("textPreview");
     const chunkList = document.getElementById("chunkList");
-    const chatInput = document.getElementById("chatInput");
-    const askButton = document.getElementById("askButton");
-    const clearChatButton = document.getElementById("clearChatButton");
-    const chatRequestBox = document.getElementById("chatRequestBox");
-    const chatTarget = document.getElementById("chatTarget");
-    const chatStatus = document.getElementById("chatStatus");
-    const chatAnswer = document.getElementById("chatAnswer");
-    const chatSources = document.getElementById("chatSources");
 
     const metricStatus = document.getElementById("metricStatus");
     const metricPages = document.getElementById("metricPages");
@@ -752,7 +697,6 @@
 
     let phaseTimers = [];
     let selectedFile = null;
-    let activeDocument = null;
 
     function bytesToLabel(size) {
         if (!size && size !== 0) return "-";
@@ -829,38 +773,11 @@
         textPreview.className = "empty";
         textPreview.textContent = "Upload a PDF to see extracted text here.";
         chunkList.className = "empty";
-        chunkList.textContent = "No chunks yet.";
+        chunkList.textContent = "Upload a PDF to see chunk summary here.";
         metricStatus.textContent = "Idle";
         metricPages.textContent = "-";
         metricChunks.textContent = "-";
         metricSize.textContent = "-";
-    }
-
-    function updateChatAvailability() {
-        const ready = Boolean(activeDocument && activeDocument.id);
-        chatInput.disabled = !ready;
-        askButton.disabled = !ready || !chatInput.value.trim();
-        chatTarget.textContent = ready
-            ? `Document ${activeDocument.original_file_name || activeDocument.id}`
-            : "No processed document selected";
-        chatStatus.innerHTML = ready
-            ? `RAG chat will target <code>${activeDocument.id}</code> with <code>top_k=5</code>.`
-            : 'Upload one PDF first. The demo will send its <code>document_id</code> to <code>/api/rag/chat</code>.';
-        chatRequestBox.textContent = ready
-            ? `POST /api/rag/chat\ndocument_id=${activeDocument.id}\ntop_k=5`
-            : "POST /api/rag/chat";
-    }
-
-    function resetChatPanels(clearDocument = true) {
-        if (clearDocument) {
-            activeDocument = null;
-        }
-        chatInput.value = "";
-        chatAnswer.classList.remove("error");
-        chatAnswer.textContent = "The answer will appear here after you ask a question.";
-        chatSources.className = "empty";
-        chatSources.textContent = "No retrieval results yet.";
-        updateChatAvailability();
     }
 
     function resetAll() {
@@ -872,7 +789,6 @@
         clearTimers();
         resetSteps();
         resetResultPanels();
-        resetChatPanels();
     }
 
     function updateSelectedFile(file = fileInput.files[0] || null) {
@@ -883,24 +799,17 @@
             requestBox.textContent = "POST /api/documents/upload";
             return;
         }
-        filename.textContent = `${file.name} • ${bytesToLabel(file.size)}`;
+        filename.textContent = `${file.name} - ${bytesToLabel(file.size)}`;
         uploadButton.disabled = false;
         requestBox.textContent = `POST /api/documents/upload\nfile=${file.name}`;
     }
 
-    async function fetchDerivedData(documentId) {
-        const [contentResponse, chunkResponse] = await Promise.all([
-            fetch("/api/document-contents/?limit=200"),
-            fetch("/api/document-chunks/?limit=200"),
-        ]);
+    async function fetchDerivedData(documentId, documentRecord) {
+        const contentResponse = await fetch("/api/document-contents/?limit=200");
 
         const contents = contentResponse.ok ? await contentResponse.json() : [];
-        const chunks = chunkResponse.ok ? await chunkResponse.json() : [];
-
         const documentContent = contents.find((item) => item.document_id === documentId);
-        const documentChunks = chunks
-            .filter((item) => item.document_id === documentId)
-            .sort((left, right) => left.chunk_index - right.chunk_index);
+        const totalChunks = Number(documentRecord?.total_chunks ?? 0);
 
         if (documentContent) {
             const preview = documentContent.raw_text.length > 1800
@@ -913,25 +822,14 @@
             textPreview.textContent = "No extracted text record was returned.";
         }
 
-        if (!documentChunks.length) {
+        if (totalChunks <= 0) {
             chunkList.className = "empty";
-            chunkList.textContent = "No chunks returned for this document.";
+            chunkList.textContent = "No chunks were reported for this document.";
             return;
         }
 
-        chunkList.className = "chunk-list";
-        chunkList.innerHTML = documentChunks.map((chunk) => {
-            const preview = chunk.content.length > 360 ? `${chunk.content.slice(0, 360)}...` : chunk.content;
-            return `
-                <article class="chunk-card">
-                    <div class="chunk-head">
-                        <div class="chunk-title">Chunk #${chunk.chunk_index}</div>
-                        <div class="chunk-meta">page ${chunk.page_from ?? "-"} • ${chunk.character_count ?? 0} chars • ${chunk.token_count ?? 0} tokens</div>
-                    </div>
-                    <div class="chunk-body">${escapeHtml(preview)}</div>
-                </article>
-            `;
-        }).join("");
+        chunkList.className = "callout";
+        chunkList.textContent = `${totalChunks} chunks were generated for this document. Chunk records remain internal and are used by the RAG retriever.`;
     }
 
     function escapeHtml(value) {
@@ -963,34 +861,10 @@
         });
     }
 
-    function postJson(url, payload) {
-        return new Promise((resolve, reject) => {
-            const request = new XMLHttpRequest();
-            request.open("POST", url);
-            request.responseType = "json";
-            request.setRequestHeader("Content-Type", "application/json");
-
-            request.onload = () => {
-                resolve({
-                    ok: request.status >= 200 && request.status < 300,
-                    status: request.status,
-                    json: async () => request.response ?? {},
-                });
-            };
-
-            request.onerror = () => {
-                reject(new Error("Network error."));
-            };
-
-            request.send(JSON.stringify(payload));
-        });
-    }
-
     async function handleUpload() {
         const file = selectedFile;
         if (!file) return;
 
-        resetChatPanels();
         uploadButton.disabled = true;
         responseBox.classList.remove("error");
         responseBox.textContent = "Uploading file and waiting for extraction + chunking to finish...";
@@ -1001,7 +875,7 @@
         textPreview.className = "empty";
         textPreview.textContent = "Backend is processing the file...";
         chunkList.className = "empty";
-        chunkList.textContent = "Chunks will appear after processing completes.";
+        chunkList.textContent = "Chunk summary will appear after processing completes.";
         beginPhases();
 
         const payload = new FormData();
@@ -1021,82 +895,15 @@
             metricChunks.textContent = String(data.total_chunks ?? "-");
             metricSize.textContent = bytesToLabel(data.file_size_bytes);
             responseBox.textContent = JSON.stringify(data, null, 2);
-            activeDocument = data;
-            updateChatAvailability();
-            await fetchDerivedData(data.id);
+            await fetchDerivedData(data.id, data);
         } catch (error) {
             finishFailure(error.message || "Upload failed.");
             textPreview.className = "callout error";
             textPreview.textContent = error.message || "Upload failed.";
             chunkList.className = "empty";
-            chunkList.textContent = "No chunks available.";
-            resetChatPanels();
+            chunkList.textContent = "No chunk summary available.";
         } finally {
             uploadButton.disabled = !selectedFile;
-        }
-    }
-
-    function renderChatSources(sources) {
-        if (!sources.length) {
-            chatSources.className = "empty";
-            chatSources.textContent = "No retrieval results returned.";
-            return;
-        }
-
-        chatSources.className = "source-list";
-        chatSources.innerHTML = sources.map((source, index) => {
-            const preview = source.content.length > 420 ? `${source.content.slice(0, 420)}...` : source.content;
-            const scoreLabel = typeof source.score === "number" ? source.score.toFixed(4) : "-";
-            return `
-                <article class="source-card">
-                    <div class="source-head">
-                        <div class="source-title">[${index + 1}] ${escapeHtml(source.original_file_name || "Document chunk")}</div>
-                        <div class="source-score">score ${escapeHtml(scoreLabel)}</div>
-                    </div>
-                    <div class="chunk-meta">page ${source.page_from ?? "-"} • chunk ${source.chunk_index}</div>
-                    <div class="source-body">${escapeHtml(preview)}</div>
-                </article>
-            `;
-        }).join("");
-    }
-
-    async function handleAsk() {
-        const query = chatInput.value.trim();
-        if (!activeDocument || !activeDocument.id || !query) return;
-
-        askButton.disabled = true;
-        chatAnswer.classList.remove("error");
-        chatAnswer.textContent = "Querying the RAG pipeline...";
-        chatSources.className = "empty";
-        chatSources.textContent = "Retrieving matching chunks...";
-        chatStatus.innerHTML = `Running <code>/api/rag/chat</code> against <code>${activeDocument.id}</code>.`;
-
-        try {
-            const payload = {
-                query,
-                document_id: activeDocument.id,
-                top_k: 5,
-                save_history: false,
-            };
-            chatRequestBox.textContent = `POST /api/rag/chat\ndocument_id=${activeDocument.id}\nquery=${query}\ntop_k=5`;
-
-            const response = await postJson("/api/rag/chat", payload);
-            const data = await response.json().catch(() => ({}));
-            if (!response.ok) {
-                throw new Error(data.detail || "RAG chat failed.");
-            }
-
-            chatAnswer.textContent = data.answer || "No answer returned.";
-            renderChatSources(Array.isArray(data.sources) ? data.sources : []);
-            chatStatus.innerHTML = `Done in <code>${Number(data.total_latency_ms || 0).toFixed(1)} ms</code> using <code>${escapeHtml(data.generator_provider || "-")}</code>.`;
-        } catch (error) {
-            chatAnswer.classList.add("error");
-            chatAnswer.textContent = error.message || "RAG chat failed.";
-            chatSources.className = "empty";
-            chatSources.textContent = "No retrieval results available.";
-            chatStatus.innerHTML = '<span class="error">RAG request failed.</span>';
-        } finally {
-            updateChatAvailability();
         }
     }
 
@@ -1119,9 +926,6 @@
     fileInput.addEventListener("change", () => updateSelectedFile());
     uploadButton.addEventListener("click", handleUpload);
     resetButton.addEventListener("click", resetAll);
-    chatInput.addEventListener("input", updateChatAvailability);
-    askButton.addEventListener("click", handleAsk);
-    clearChatButton.addEventListener("click", () => resetChatPanels(false));
     resetAll();
     window.escapeHtml = escapeHtml;
 </script>
