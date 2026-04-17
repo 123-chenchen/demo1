@@ -28,6 +28,8 @@ class RetrievalService:
         query: str,
         top_k: int | None = None,
         document_id: UUID | None = None,
+        notebook_id: UUID | None = None,
+        public_only: bool = False,
     ) -> RetrievalTrace:
         settings = get_settings()
         final_top_k = max(1, top_k or settings.retrieval_top_k)
@@ -38,6 +40,8 @@ class RetrievalService:
             query=query,
             limit=final_top_k,
             document_id=document_id,
+            notebook_id=notebook_id,
+            public_only=public_only,
         )
         retrieval_latency_ms = (perf_counter() - retrieval_started_at) * 1000
 

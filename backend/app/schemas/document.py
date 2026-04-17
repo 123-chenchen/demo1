@@ -33,6 +33,7 @@ class DocumentUpdate(AppSchema):
 
 class DocumentRead(AppSchema):
     id: UUID
+    notebook_id: UUID | None = None
     storage_key: str
     original_file_name: str
     mime_type: str

@@ -3,9 +3,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import get_db
+from app.api.dependencies import get_current_user_optional, get_db
+from app.db.models import User
 from app.schemas.rag import ChatbotAskRequest, ChatbotAskResponse, ReindexResponse
-from app.services.chatbot import ChatbotServiceError, chatbot_service
+from app.services.chatbot import ChatbotServiceError, ChatbotServicePermissionError, chatbot_service
 from app.services.retrieval import RetrievalIndexerError, retrieval_indexer_service, retrieval_service
 from app.services.vector_store import VectorStoreError
 
@@ -21,11 +22,14 @@ def get_rag_config() -> dict[str, object]:
 def ask_chatbot(
     payload: ChatbotAskRequest,
     db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user_optional),
 ) -> dict[str, object]:
     try:
-        return chatbot_service.ask(db, request=payload)
+        return chatbot_service.ask(db, request=payload, current_user=current_user)
     except ChatbotServiceError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ChatbotServicePermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except (VectorStoreError, ValueError) as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 

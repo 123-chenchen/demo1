@@ -6,7 +6,7 @@ Tai lieu nay mo ta schema PostgreSQL hien tai cua backend PDF Chatbot.
 
 Database duoc chia thanh 4 nhom chinh:
 
-- Authentication: `users`, `refresh_tokens`
+- Authentication and workspace: `users`, `notebooks`, `pending_registrations`, `email_otps`, `refresh_tokens`
 - Document ingestion: `documents`, `document_contents`, `document_chunks`
 - Chat history: `chat_sessions`, `chat_messages`
 - Retrieval trace: `message_sources`
@@ -28,8 +28,10 @@ Database duoc chia thanh 4 nhom chinh:
 ## Quan he tong quan
 
 ```text
+users 1---n notebooks
 users 1---n refresh_tokens
-users 1---n chat_sessions
+notebooks 1---n documents
+notebooks 1---n chat_sessions
 
 documents 1---1 document_contents
 documents 1---n document_chunks
@@ -47,15 +49,56 @@ Luu tai khoan dang nhap cua he thong.
 | --- | --- | --- | --- | --- |
 | `id` | `uuid` | No | PK, default `gen_random_uuid()` | Dinh danh user |
 | `email` | `varchar(255)` | No | Unique | Email dang nhap chinh |
-| `username` | `varchar(50)` | Yes | Unique | Username hien thi hoac login phu |
 | `password_hash` | `varchar(255)` | No |  | Mat khau da hash, khong luu plain text |
-| `full_name` | `varchar(255)` | Yes |  | Ho ten nguoi dung |
+| `is_verified` | `boolean` | No | default `false` | Email da xac thuc OTP hay chua |
 | `is_active` | `boolean` | No | default `true` | User con duoc phep su dung he thong |
 | `is_superuser` | `boolean` | No | default `false` | Quyen admin/noi bo |
 | `last_login_at` | `timestamptz` | Yes |  | Thoi diem login thanh cong gan nhat |
 | `metadata` | `jsonb` | No | default `{}` | Du lieu mo rong cho profile/quyen/cai dat |
 | `created_at` | `timestamptz` | No | default `now()` | Thoi diem tao record |
 | `updated_at` | `timestamptz` | No | default `now()` | Thoi diem cap nhat record |
+
+Ten hien thi khong luu thanh cot rieng nua. Backend suy ra `name` tu phan local-part cua email, vi du `nguyen.van.a@gmail.com` -> `Nguyen Van A`.
+
+## Bang `notebooks`
+
+Moi user co the co nhieu notebook. Khi user duoc tao/verify lan dau, backend se tao 1 notebook mac dinh de giu backward compatibility cho cac flow cu.
+
+| Attribute | Type | Nullable | Rang buoc | Y nghia |
+| --- | --- | --- | --- | --- |
+| `id` | `uuid` | No | PK, default `gen_random_uuid()` | Dinh danh notebook |
+| `user_id` | `uuid` | No | FK -> `users.id`, index, on delete cascade | Notebook thuoc ve user nao |
+| `title` | `varchar(255)` | Yes |  | Ten notebook de hien thi UI neu can |
+| `metadata` | `jsonb` | No | default `{}` | Du lieu mo rong cho notebook |
+| `created_at` | `timestamptz` | No | default `now()` | Thoi diem tao record |
+| `updated_at` | `timestamptz` | No | default `now()` | Thoi diem cap nhat record |
+
+## Bang `pending_registrations`
+
+Luu tam thong tin dang ky trong luc cho verify OTP. User chi duoc tao trong bang `users` sau khi OTP hop le.
+
+| Attribute | Type | Nullable | Rang buoc | Y nghia |
+| --- | --- | --- | --- | --- |
+| `id` | `uuid` | No | PK, default `gen_random_uuid()` | Dinh danh record dang ky tam |
+| `email` | `varchar(255)` | No | Unique | Email dang ky dang cho verify |
+| `password_hash` | `varchar(255)` | No |  | Mat khau da hash, khong luu plain text |
+| `expires_at` | `timestamptz` | No |  | Thoi diem het han cho verify OTP |
+| `created_at` | `timestamptz` | No | default `now()` | Thoi diem tao record |
+| `updated_at` | `timestamptz` | No | default `now()` | Thoi diem cap nhat record |
+
+## Bang `email_otps`
+
+Luu OTP email cho hai muc dich `register` va `reset_password`.
+
+| Attribute | Type | Nullable | Rang buoc | Y nghia |
+| --- | --- | --- | --- | --- |
+| `id` | `uuid` | No | PK, default `gen_random_uuid()` | Dinh danh record OTP |
+| `email` | `varchar(255)` | No | Index | Email nhan OTP |
+| `otp_hash` | `varchar(255)` | No |  | Ban hash cua OTP, khong luu ma goc |
+| `purpose` | `varchar(32)` | No |  | Muc dich su dung: `register` hoac `reset_password` |
+| `expires_at` | `timestamptz` | No |  | Thoi diem het han cua OTP |
+| `is_used` | `boolean` | No | default `false` | OTP da duoc dung hay chua |
+| `created_at` | `timestamptz` | No | default `now()` | Thoi diem tao OTP |
 
 ## Bang `refresh_tokens`
 
@@ -81,6 +124,7 @@ Moi file tai len la mot record.
 | Attribute | Type | Nullable | Rang buoc | Y nghia |
 | --- | --- | --- | --- | --- |
 | `id` | `uuid` | No | PK, default `gen_random_uuid()` | Dinh danh tai lieu |
+| `notebook_id` | `uuid` | Yes | FK -> `notebooks.id`, index, on delete set null | Tai lieu thuoc notebook nao; `null` nghia la du lieu public/legacy |
 | `storage_key` | `varchar(512)` | No | Unique | Duong dan/object key trong storage |
 | `original_file_name` | `varchar(255)` | No |  | Ten file goc nguoi dung upload |
 | `mime_type` | `varchar(100)` | No | default `application/pdf` | Loai file |
@@ -134,7 +178,7 @@ Dai dien cho mot cuoc hoi thoai.
 | Attribute | Type | Nullable | Rang buoc | Y nghia |
 | --- | --- | --- | --- | --- |
 | `id` | `uuid` | No | PK, default `gen_random_uuid()` | Dinh danh session |
-| `user_id` | `uuid` | Yes | FK -> `users.id`, index, on delete set null | Session co the gan voi user da dang nhap |
+| `notebook_id` | `uuid` | Yes | FK -> `notebooks.id`, index, on delete set null | Session thuoc notebook nao; `null` nghia la session public/anonymous |
 | `title` | `varchar(255)` | Yes |  | Tieu de session de hien thi UI |
 | `metadata` | `jsonb` | No | default `{}` | Prompt preset, locale, filter retrieval, UI state |
 | `created_at` | `timestamptz` | No | default `now()` | Thoi diem tao session |
@@ -182,9 +226,10 @@ Luu cac chunk da duoc su dung de tao mot cau tra loi. Bang nay giup trace retrie
 ## Thu tu insert du lieu khuyen nghi
 
 1. Tao `users` neu co auth.
-2. Tao `documents`.
-3. Extract text va tao `document_contents`.
-4. Chunk text va tao `document_chunks`.
-5. Tao `chat_sessions`.
-6. Tao `chat_messages`.
-7. Ghi `message_sources` cho cac message `assistant`.
+2. Tao `notebooks` cho tung user.
+3. Tao `documents`.
+4. Extract text va tao `document_contents`.
+5. Chunk text va tao `document_chunks`.
+6. Tao `chat_sessions`.
+7. Tao `chat_messages`.
+8. Ghi `message_sources` cho cac message `assistant`.

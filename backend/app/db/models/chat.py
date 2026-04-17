@@ -19,9 +19,9 @@ class ChatSession(TimestampMixin, Base):
         default=uuid.uuid4,
         server_default=text("gen_random_uuid()"),
     )
-    user_id: Mapped[uuid.UUID | None] = mapped_column(
+    notebook_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="SET NULL"),
+        ForeignKey("notebooks.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -34,10 +34,10 @@ class ChatSession(TimestampMixin, Base):
         server_default=text("'{}'::jsonb"),
     )
 
-    user: Mapped["User | None"] = relationship(
+    notebook: Mapped["Notebook | None"] = relationship(
         back_populates="chat_sessions",
-        primaryjoin="ChatSession.user_id == User.id",
-        foreign_keys=[user_id],
+        primaryjoin="ChatSession.notebook_id == Notebook.id",
+        foreign_keys=[notebook_id],
     )
     messages: Mapped[list["ChatMessage"]] = relationship(
         back_populates="session",

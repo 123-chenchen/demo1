@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 from app.services.chatbot import ChatbotServiceError, chatbot_service
 from app.services.retrieval import RetrievalIndexerError, retrieval_indexer_service
 from app.services.vector_store import VectorStoreError
+from app.services.auth import auth_service
 
 
 def _chat_response(*, document_id: UUID) -> dict[str, object]:
@@ -47,7 +49,7 @@ def test_chat_endpoint_returns_answer_payload(client, override_db, monkeypatch) 
     override_db()
     document_id = uuid4()
 
-    def fake_ask(db, *, request):
+    def fake_ask(db, *, request, current_user=None):
         assert request.query == "Summarize the PDF."
         assert request.document_id == document_id
         return _chat_response(document_id=document_id)
@@ -75,7 +77,7 @@ def test_chat_endpoint_returns_answer_payload(client, override_db, monkeypatch) 
 def test_chat_endpoint_maps_chatbot_errors_to_http_404(client, override_db, monkeypatch) -> None:
     override_db()
 
-    def fake_ask(db, *, request):
+    def fake_ask(db, *, request, current_user=None):
         raise ChatbotServiceError("chat session not found.")
 
     monkeypatch.setattr(chatbot_service, "ask", fake_ask)
@@ -92,7 +94,7 @@ def test_chat_endpoint_maps_chatbot_errors_to_http_404(client, override_db, monk
 def test_chat_endpoint_maps_vector_store_errors_to_http_503(client, override_db, monkeypatch) -> None:
     override_db()
 
-    def fake_ask(db, *, request):
+    def fake_ask(db, *, request, current_user=None):
         raise VectorStoreError("Could not retrieve document chunks from Qdrant.")
 
     monkeypatch.setattr(chatbot_service, "ask", fake_ask)
@@ -104,6 +106,37 @@ def test_chat_endpoint_maps_vector_store_errors_to_http_503(client, override_db,
 
     assert response.status_code == 503
     assert response.json()["detail"] == "Could not retrieve document chunks from Qdrant."
+
+
+def test_chat_endpoint_passes_current_user_when_bearer_token_is_present(client, override_db, monkeypatch) -> None:
+    override_db()
+    document_id = uuid4()
+    current_user_obj = SimpleNamespace(id=uuid4(), email="user@example.com")
+
+    def fake_get_current_user_from_access_token(db, *, token):
+        assert token == "access-token"
+        return current_user_obj
+
+    def fake_ask(db, *, request, current_user=None):
+        assert current_user is not None
+        assert current_user.id == current_user_obj.id
+        return _chat_response(document_id=document_id)
+
+    monkeypatch.setattr(auth_service, "get_current_user_from_access_token", fake_get_current_user_from_access_token)
+    monkeypatch.setattr(chatbot_service, "ask", fake_ask)
+
+    response = client.post(
+        "/api/rag/chat",
+        json={
+            "query": "Summarize the PDF.",
+            "document_id": str(document_id),
+            "top_k": 3,
+            "save_history": True,
+        },
+        headers={"Authorization": "Bearer access-token"},
+    )
+
+    assert response.status_code == 200
 
 
 def test_reindex_endpoint_returns_summary(client, override_db, monkeypatch) -> None:

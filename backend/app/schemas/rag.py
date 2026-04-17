@@ -27,6 +27,7 @@ class RetrievalChunkRead(AppSchema):
 class ChatbotAskRequest(AppSchema):
     query: str = Field(min_length=1)
     top_k: int = Field(default=5, ge=1, le=20)
+    notebook_id: UUID | None = None
     document_id: UUID | None = None
     session_id: UUID | None = None
     save_history: bool = True
@@ -35,6 +36,7 @@ class ChatbotAskRequest(AppSchema):
 class ChatbotAskResponse(AppSchema):
     query: str
     answer: str
+    notebook_id: UUID | None = None
     document_id: UUID | None = None
     session_id: UUID | None = None
     user_message_id: UUID | None = None

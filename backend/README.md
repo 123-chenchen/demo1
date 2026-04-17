@@ -39,6 +39,9 @@ backend/
 ## Schema
 
 - `users`: tai khoan dang nhap.
+- `notebooks`: moi user co nhieu notebook; notebook gom nhieu PDF va chat session.
+- `pending_registrations`: luu tam email va password hash trong luc cho xac thuc OTP dang ky.
+- `email_otps`: luu OTP cho `register` va `reset_password`.
 - `refresh_tokens`: luu refresh token dang hoat dong hoac da revoke.
 - `documents`: moi file PDF la mot record.
 - `document_contents`: luu text thô da extract tu tai lieu, 1-1 voi `documents`.
@@ -108,36 +111,47 @@ Trong Docker Compose, backend goi Ollama qua `http://ollama:11434`.
 
 Tat ca endpoint CRUD nam duoi prefix `/api`.
 
-- `GET/POST /api/users`
-- `GET/PATCH/DELETE /api/users/{item_id}`
-- `GET/POST /api/refresh-tokens`
-- `GET/PATCH/DELETE /api/refresh-tokens/{item_id}`
-- `GET/POST /api/documents`
+Auth flow moi:
+
+- `POST /api/auth/register/request`
+- `POST /api/auth/register/verify`
+- `POST /api/auth/login`
+- `GET /api/auth/me`
+- `POST /api/auth/forgot-password/request`
+- `POST /api/auth/forgot-password/verify`
+- `GET/POST /api/notebooks`
+- `GET/PATCH /api/notebooks/{item_id}`
+- `GET /api/documents`
 - `GET/PATCH/DELETE /api/documents/{item_id}`
 - `POST /api/documents/upload`
 - `POST /api/documents/{document_id}/ingest`
-- `GET/POST /api/document-contents`
-- `GET/PATCH/DELETE /api/document-contents/{item_id}`
-- `GET/POST /api/document-chunks`
-- `GET/PATCH/DELETE /api/document-chunks/{item_id}`
+- `GET /api/document-contents`
+- `GET /api/document-contents/{item_id}`
+- `GET /api/document-chunks`
+- `GET /api/document-chunks/{item_id}`
 - `GET /api/rag/config`
 - `POST /api/rag/chat`
 - `POST /api/rag/reindex`
 - `GET/POST /api/chat-sessions`
 - `GET/PATCH/DELETE /api/chat-sessions/{item_id}`
-- `GET/POST /api/chat-messages`
-- `GET/PATCH/DELETE /api/chat-messages/{item_id}`
-- `GET/POST /api/message-sources`
-- `GET/PATCH/DELETE /api/message-sources/{item_id}`
 
 Ghi chu:
 
-- `POST /api/users` nhan `password` va backend se hash thanh `password_hash`.
-- `POST /api/refresh-tokens` nhan `token_value` va backend se hash thanh `token_hash`.
-- `POST /api/documents/upload` nhan file PDF `multipart/form-data`, upload len MinIO, extract text bang `pypdf`, chunk text, roi tao/cap nhat `documents`, `document_contents`, `document_chunks`.
+- `POST /api/auth/register/request` validate email, password, tao OTP, luu pending registration, roi gui OTP qua SMTP Gmail.
+- `POST /api/auth/register/verify` verify OTP va chi tao `users` sau khi ma dung, chua het han, chua dung. Sau khi verify, backend tu tao notebook mac dinh dau tien cho user.
+- `POST /api/auth/login` chi cho phep user da verify email dang nhap va tra ve access token + refresh token. Payload `user` trong response gom `email` va `name` duoc suy ra tu email.
+- `GET /api/auth/me` tra ve `email` va `name` cua user hien tai duoc suy ra tu access token `Bearer`.
+- `POST /api/auth/forgot-password/request` tao OTP reset password cho email ton tai.
+- `POST /api/auth/forgot-password/verify` verify OTP reset, hash mat khau moi va revoke refresh token cu.
+- `refresh_tokens` duoc xu ly noi bo trong auth service, khong expose CRUD API cong khai.
+- `users` la bang noi bo phuc vu auth va lien ket du lieu, khong con expose CRUD API cong khai.
+- `GET/POST/PATCH /api/notebooks*` cho phep user liet ke, tao va sua cac notebook cua chinh minh.
+- `documents`, `document_contents`, `document_chunks` va `chat_sessions` deu duoc scope theo notebook. User da dang nhap chi thay du lieu trong notebook duoc chon cua minh; request khong auth chi thay du lieu public khong gan notebook.
+- Cac endpoint co chon notebook (`documents`, `chat-sessions`, `rag/chat`) deu nhan `notebook_id` tuy chon. Neu bo trong, backend se dung notebook mac dinh cua user cho cac flow can tao du lieu moi.
+- `POST /api/documents/upload` nhan file PDF `multipart/form-data`, upload len MinIO, extract text bang `pypdf`, chunk text, roi tao/cap nhat `documents`, `document_contents`, `document_chunks`. Neu co access token thi document se duoc gan vao notebook duoc chon hoac notebook mac dinh.
 - Sau khi chunk xong, backend tao embedding bang `sentence-transformers/all-MiniLM-L6-v2` qua `LangChain HuggingFaceEmbeddings` va upsert vao `Qdrant` collection `document_chunks`.
-- `POST /api/documents/{document_id}/ingest` cho phep chay lai buoc extract + chunk + embedding cho tai lieu da upload.
-- `POST /api/rag/chat` dung 1 pipeline RAG nhe: `LangChain basic + Qdrant + all-MiniLM-L6-v2`.
+- `POST /api/documents/{document_id}/ingest` cho phep chay lai buoc extract + chunk + embedding cho tai lieu da upload trong scope hien tai.
+- `POST /api/rag/chat` dung 1 pipeline RAG nhe: `LangChain basic + Qdrant + all-MiniLM-L6-v2`. Request JSON co the gui `notebook_id`; neu khong gui va cung khong chi ro `document_id`/`session_id`, retrieval mac dinh chi tim trong notebook mac dinh cua user hien tai.
 - `POST /api/rag/reindex` rebuild toan bo vector trong Qdrant theo payload LangChain hien tai. Nen chay 1 lan neu da co vector cu.
 - Danh sach endpoint ho tro `skip` va `limit`.
 
@@ -170,6 +184,18 @@ OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL_NAME=qwen2.5:7b-instruct
 GOOGLE_MODEL_NAME=
 GOOGLE_API_KEY=
+JWT_SECRET_KEY=change-me
+JWT_ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+REFRESH_TOKEN_EXPIRE_DAYS=7
+OTP_EXPIRE_MINUTES=10
+OTP_LENGTH=6
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_FROM_EMAIL=
+SMTP_STARTTLS=true
 ```
 
 Mac dinh backend se goi Ollama voi model `qwen2.5:7b-instruct`, tuong ung voi `Qwen/Qwen2.5-7B-Instruct`.

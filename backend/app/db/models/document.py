@@ -19,6 +19,12 @@ class Document(TimestampMixin, Base):
         default=uuid.uuid4,
         server_default=text("gen_random_uuid()"),
     )
+    notebook_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("notebooks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     storage_key: Mapped[str] = mapped_column(String(512), nullable=False, unique=True)
     original_file_name: Mapped[str] = mapped_column(String(255), nullable=False)
     mime_type: Mapped[str] = mapped_column(
@@ -44,6 +50,11 @@ class Document(TimestampMixin, Base):
         server_default=text("'{}'::jsonb"),
     )
 
+    notebook: Mapped["Notebook | None"] = relationship(
+        back_populates="documents",
+        primaryjoin="Document.notebook_id == Notebook.id",
+        foreign_keys=[notebook_id],
+    )
     content: Mapped["DocumentContent | None"] = relationship(
         back_populates="document",
         cascade="all, delete-orphan",

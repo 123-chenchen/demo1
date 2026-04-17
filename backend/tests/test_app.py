@@ -40,3 +40,32 @@ def test_rag_config_reflects_runtime_settings(client) -> None:
     assert payload["collection_name"] == settings.qdrant_collection_name
     assert payload["embedding_model"] == settings.embedding_model_name
     assert payload["top_k"] == settings.retrieval_top_k
+
+
+def test_openapi_does_not_expose_refresh_token_crud_routes(client) -> None:
+    response = client.get("/openapi.json")
+
+    assert response.status_code == 200
+    paths = response.json()["paths"]
+    assert "/api/refresh-tokens/" not in paths
+    assert "/api/refresh-tokens/{item_id}" not in paths
+
+
+def test_openapi_does_not_expose_user_crud_routes(client) -> None:
+    response = client.get("/openapi.json")
+
+    assert response.status_code == 200
+    paths = response.json()["paths"]
+    assert "/api/users/" not in paths
+    assert "/api/users/{item_id}" not in paths
+
+
+def test_openapi_does_not_expose_internal_chat_crud_routes(client) -> None:
+    response = client.get("/openapi.json")
+
+    assert response.status_code == 200
+    paths = response.json()["paths"]
+    assert "/api/chat-messages/" not in paths
+    assert "/api/chat-messages/{item_id}" not in paths
+    assert "/api/message-sources/" not in paths
+    assert "/api/message-sources/{item_id}" not in paths

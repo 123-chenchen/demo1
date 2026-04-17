@@ -34,6 +34,18 @@ class Settings(BaseSettings):
     ollama_model_name: str | None = "llama3"
     google_api_key: str | None = None
     google_model_name: str | None = None
+    jwt_secret_key: str = "change-me"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 30
+    refresh_token_expire_days: int = 7
+    otp_expire_minutes: int = 10
+    otp_length: int = 6
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_from_email: str | None = None
+    smtp_starttls: bool = True
 
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),

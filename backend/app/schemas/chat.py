@@ -10,20 +10,19 @@ from app.schemas.base import AppSchema
 
 
 class ChatSessionCreate(AppSchema):
-    user_id: UUID | None = None
+    notebook_id: UUID | None = None
     title: str | None = None
     metadata: dict = Field(default_factory=dict)
 
 
 class ChatSessionUpdate(AppSchema):
-    user_id: UUID | None = None
     title: str | None = None
     metadata: dict | None = None
 
 
 class ChatSessionRead(AppSchema):
     id: UUID
-    user_id: UUID | None = None
+    notebook_id: UUID | None = None
     title: str | None = None
     metadata: dict = Field(default_factory=dict)
     created_at: datetime

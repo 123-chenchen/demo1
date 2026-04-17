@@ -3,13 +3,18 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import ChatMessage, ChatSession, MessageRole, MessageSource
+from app.db.models import ChatMessage, ChatSession, Document, MessageRole, MessageSource, User
 from app.schemas.rag import ChatbotAskRequest
 from app.services.chatbot.generation import generate_answer
 from app.services.retrieval import chunk_candidate_to_dict, retrieval_service
+from app.services.auth import AuthNotFoundError, auth_service
 
 
 class ChatbotServiceError(Exception):
+    pass
+
+
+class ChatbotServicePermissionError(Exception):
     pass
 
 
@@ -21,11 +26,44 @@ def _build_session_title(query: str) -> str:
 
 
 class ChatbotService:
-    def ask(self, db: Session, *, request: ChatbotAskRequest) -> dict[str, object]:
+    def ask(
+        self,
+        db: Session,
+        *,
+        request: ChatbotAskRequest,
+        current_user: User | None = None,
+    ) -> dict[str, object]:
+        selected_notebook = self._resolve_requested_notebook(
+            db,
+            notebook_id=request.notebook_id,
+            current_user=current_user,
+            use_default=request.document_id is None and request.session_id is None,
+        )
+        accessible_document = self._resolve_accessible_document(
+            db,
+            document_id=request.document_id,
+            current_user=current_user,
+            selected_notebook=selected_notebook,
+        )
+        session_notebook = self._resolve_session_notebook(
+            db,
+            current_user=current_user,
+            selected_notebook=selected_notebook,
+            accessible_document=accessible_document,
+            save_history=request.save_history,
+        )
+        if accessible_document is not None:
+            retrieval_notebook_id = accessible_document.notebook_id
+            public_only = accessible_document.notebook_id is None
+        else:
+            retrieval_notebook_id = selected_notebook.id if selected_notebook is not None else None
+            public_only = current_user is None
         trace = retrieval_service.retrieve(
             query=request.query,
             top_k=request.top_k,
             document_id=request.document_id,
+            notebook_id=retrieval_notebook_id,
+            public_only=public_only,
         )
         generation = generate_answer(query=request.query, candidates=trace.candidates)
 
@@ -38,6 +76,8 @@ class ChatbotService:
                 db,
                 session_id=request.session_id,
                 query=request.query,
+                current_user=current_user,
+                selected_notebook=session_notebook,
             )
             session_id = session.id
 
@@ -47,7 +87,7 @@ class ChatbotService:
                 content=request.query,
                 extra_metadata={
                     "top_k": request.top_k,
-                    "document_id": str(request.document_id) if request.document_id else None,
+                    "document_id": str(accessible_document.id) if accessible_document else None,
                     "retriever": trace.retriever,
                     "embedding_model": trace.embedding_model,
                     "vector_store": trace.vector_store,
@@ -70,7 +110,7 @@ class ChatbotService:
                     "used_fallback_generator": generation.used_fallback,
                     "retrieval_latency_ms": trace.retrieval_latency_ms,
                     "total_latency_ms": trace.total_latency_ms,
-                    "document_id": str(request.document_id) if request.document_id else None,
+                    "document_id": str(accessible_document.id) if accessible_document else None,
                 },
             )
             db.add(assistant_message)
@@ -94,7 +134,16 @@ class ChatbotService:
         return {
             "query": request.query,
             "answer": generation.answer,
-            "document_id": request.document_id,
+            "notebook_id": (
+                session.notebook_id
+                if request.save_history and session_id is not None
+                else (
+                    selected_notebook.id
+                    if selected_notebook is not None
+                    else accessible_document.notebook_id if accessible_document is not None else None
+                )
+            ),
+            "document_id": accessible_document.id if accessible_document else None,
             "session_id": session_id,
             "user_message_id": user_message_id,
             "assistant_message_id": assistant_message_id,
@@ -115,20 +164,117 @@ class ChatbotService:
         *,
         session_id,
         query: str,
+        current_user: User | None = None,
+        selected_notebook=None,
     ) -> ChatSession:
         if session_id is not None:
             session = db.scalar(select(ChatSession).where(ChatSession.id == session_id))
             if session is None:
                 raise ChatbotServiceError("chat session not found.")
+            if session.notebook_id is not None:
+                if current_user is None:
+                    raise ChatbotServicePermissionError("authentication is required for this chat session.")
+                if auth_service.get_user_notebook(
+                    db,
+                    user_id=current_user.id,
+                    notebook_id=session.notebook_id,
+                ) is None:
+                    raise ChatbotServicePermissionError("chat session does not belong to the current user.")
+                if selected_notebook is not None and session.notebook_id != selected_notebook.id:
+                    raise ChatbotServicePermissionError("chat session does not belong to the selected notebook.")
+            elif selected_notebook is not None:
+                session.notebook_id = selected_notebook.id
+                db.add(session)
             return session
 
         session = ChatSession(
+            notebook_id=selected_notebook.id if selected_notebook is not None else None,
             title=_build_session_title(query),
             extra_metadata={},
         )
         db.add(session)
         db.flush()
         return session
+
+    def _resolve_accessible_document(
+        self,
+        db: Session,
+        *,
+        document_id,
+        current_user: User | None = None,
+        selected_notebook=None,
+    ) -> Document | None:
+        if document_id is None:
+            return None
+
+        document = db.scalar(select(Document).where(Document.id == document_id))
+        if document is None:
+            raise ChatbotServiceError("document not found.")
+
+        if document.notebook_id is None:
+            return document
+
+        if current_user is None:
+            raise ChatbotServicePermissionError("authentication is required for this document.")
+        if auth_service.get_user_notebook(
+            db,
+            user_id=current_user.id,
+            notebook_id=document.notebook_id,
+        ) is None:
+            raise ChatbotServicePermissionError("document does not belong to the current user.")
+        if selected_notebook is not None and document.notebook_id != selected_notebook.id:
+            raise ChatbotServicePermissionError("document does not belong to the selected notebook.")
+        return document
+
+    def _resolve_requested_notebook(
+        self,
+        db: Session,
+        *,
+        notebook_id,
+        current_user: User | None = None,
+        use_default: bool = False,
+    ):
+        if current_user is None:
+            if notebook_id is not None:
+                raise ChatbotServicePermissionError("authentication is required for this notebook.")
+            return None
+
+        if notebook_id is None and not use_default:
+            return None
+
+        try:
+            return auth_service.resolve_user_notebook(
+                db,
+                user=current_user,
+                notebook_id=notebook_id,
+            )
+        except AuthNotFoundError as exc:
+            raise ChatbotServiceError(str(exc)) from exc
+
+    def _resolve_session_notebook(
+        self,
+        db: Session,
+        *,
+        current_user: User | None = None,
+        selected_notebook=None,
+        accessible_document: Document | None = None,
+        save_history: bool = False,
+    ):
+        if selected_notebook is not None:
+            return selected_notebook
+        if current_user is None or not save_history:
+            return None
+        if accessible_document is not None and accessible_document.notebook_id is not None:
+            return auth_service.get_user_notebook(
+                db,
+                user_id=current_user.id,
+                notebook_id=accessible_document.notebook_id,
+            )
+        return auth_service.resolve_user_notebook(
+            db,
+            user=current_user,
+            notebook_id=None,
+        )
 
 
 chatbot_service = ChatbotService()

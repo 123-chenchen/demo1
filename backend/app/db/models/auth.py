@@ -15,7 +15,6 @@ class User(TimestampMixin, Base):
     __tablename__ = "users"
     __table_args__ = (
         UniqueConstraint("email", name="uq_users_email"),
-        UniqueConstraint("username", name="uq_users_username"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -25,9 +24,13 @@ class User(TimestampMixin, Base):
         server_default=text("gen_random_uuid()"),
     )
     email: Mapped[str] = mapped_column(String(255), nullable=False)
-    username: Mapped[str | None] = mapped_column(String(50), nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_verified: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+    )
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
@@ -49,10 +52,60 @@ class User(TimestampMixin, Base):
         server_default=text("'{}'::jsonb"),
     )
 
-    chat_sessions: Mapped[list["ChatSession"]] = relationship(back_populates="user")
+    notebooks: Mapped[list["Notebook"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
     refresh_tokens: Mapped[list["RefreshToken"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
+    )
+
+    @property
+    def name(self) -> str:
+        local_part = (self.email or "").split("@", 1)[0].strip()
+        alias_free_local_part = local_part.split("+", 1)[0].strip() or local_part
+        tokens = [token for token in alias_free_local_part.replace("-", ".").replace("_", ".").split(".") if token]
+        if not tokens:
+            return self.email
+        return " ".join(token if token.isdigit() else token[:1].upper() + token[1:].lower() for token in tokens)
+
+
+class PendingRegistration(TimestampMixin, Base):
+    __tablename__ = "pending_registrations"
+    __table_args__ = (
+        UniqueConstraint("email", name="uq_pending_registrations_email"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=text("gen_random_uuid()"),
+    )
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class EmailOTP(CreatedAtMixin, Base):
+    __tablename__ = "email_otps"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=text("gen_random_uuid()"),
+    )
+    email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    otp_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(32), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    is_used: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
     )
 
 

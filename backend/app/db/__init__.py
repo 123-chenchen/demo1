@@ -5,7 +5,10 @@ from app.db.models import (
     Document,
     DocumentChunk,
     DocumentContent,
+    EmailOTP,
     MessageSource,
+    Notebook,
+    PendingRegistration,
     RefreshToken,
     User,
 )
@@ -13,6 +16,9 @@ from app.db.models import (
 __all__ = [
     "Base",
     "User",
+    "Notebook",
+    "PendingRegistration",
+    "EmailOTP",
     "RefreshToken",
     "Document",
     "DocumentContent",

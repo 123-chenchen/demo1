@@ -130,6 +130,7 @@ def _build_payload_metadata(document: Document, chunk: DocumentChunk) -> dict[st
     return {
         "chunk_id": str(chunk.id),
         "document_id": str(document.id),
+        "notebook_id": str(document.notebook_id) if document.notebook_id else None,
         "chunk_index": chunk.chunk_index,
         "page_from": chunk.page_from,
         "page_to": chunk.page_to,
@@ -180,18 +181,48 @@ def upsert_document_chunks(*, document: Document, chunks: Sequence[DocumentChunk
         raise VectorStoreError("Could not store document chunk vectors in Qdrant.") from exc
 
 
-def build_document_filter(document_id: UUID | None) -> models.Filter | None:
-    if document_id is None:
-        return None
+def build_document_filter(
+    *,
+    document_id: UUID | None,
+    notebook_id: UUID | None = None,
+    public_only: bool = False,
+) -> models.Filter | None:
+    must_conditions: list[object] = []
 
-    return models.Filter(
-        must=[
+    if document_id is not None:
+        must_conditions.append(
             models.FieldCondition(
                 key=f"{LANGCHAIN_METADATA_KEY}.document_id",
                 match=models.MatchValue(value=str(document_id)),
             )
+        )
+
+    if notebook_id is not None:
+        must_conditions.append(
+            models.FieldCondition(
+                key=f"{LANGCHAIN_METADATA_KEY}.notebook_id",
+                match=models.MatchValue(value=str(notebook_id)),
+            )
+        )
+
+    if public_only:
+        public_conditions = [
+            models.IsNullCondition(
+                is_null=models.PayloadField(key=f"{LANGCHAIN_METADATA_KEY}.notebook_id"),
+            ),
+            models.IsEmptyCondition(
+                is_empty=models.PayloadField(key=f"{LANGCHAIN_METADATA_KEY}.notebook_id"),
+            ),
         ]
-    )
+        return models.Filter(
+            must=must_conditions or None,
+            min_should=models.MinShould(conditions=public_conditions, min_count=1),
+        )
+
+    if not must_conditions:
+        return None
+
+    return models.Filter(must=must_conditions)
 
 
 def similarity_search(
@@ -199,6 +230,8 @@ def similarity_search(
     query: str,
     limit: int,
     document_id: UUID | None = None,
+    notebook_id: UUID | None = None,
+    public_only: bool = False,
 ) -> list[tuple[LangChainDocument, float]]:
     ensure_collection()
 
@@ -206,7 +239,11 @@ def similarity_search(
         return get_vector_store().similarity_search_with_score(
             query=query,
             k=limit,
-            filter=build_document_filter(document_id),
+            filter=build_document_filter(
+                document_id=document_id,
+                notebook_id=notebook_id,
+                public_only=public_only,
+            ),
         )
     except Exception as exc:
         raise VectorStoreError("Could not retrieve document chunks from Qdrant.") from exc
