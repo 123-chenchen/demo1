@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.routers.auth import auth_router
+from app.api.routers.chatbot import chatbot_router
 from app.api.routers.chats import chat_sessions_router
 from app.api.routers.documents import (
     document_contents_router,
@@ -16,3 +17,4 @@ api_router.include_router(document_upload_router)
 api_router.include_router(documents_router)
 api_router.include_router(document_contents_router)
 api_router.include_router(chat_sessions_router)
+api_router.include_router(chatbot_router)

@@ -108,6 +108,7 @@ def _get_prompt_template() -> ChatPromptTemplate:
                 "You are a grounded retrieval chatbot. "
                 "Answer only from the supplied context. "
                 "If the context is insufficient, say so explicitly. "
+                "Answer in the same language as the user's question. "
                 "Keep the answer concise and cite supporting snippets as [1], [2], ...",
             ),
             (
@@ -132,7 +133,7 @@ def generate_answer(*, query: str, candidates: list[ChunkCandidate]) -> AnswerGe
     settings = get_settings()
     provider = (settings.chat_provider or "extractive").strip().lower()
 
-    if provider == "extractive" or not candidates:
+    if provider == "extractive":
         return _extractive_fallback(query, candidates)
 
     try:

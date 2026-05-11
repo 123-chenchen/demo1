@@ -92,8 +92,8 @@ services:
       RETRIEVAL_TOP_K: ${RETRIEVAL_TOP_K:-5}
       CHAT_PROVIDER: ${CHAT_PROVIDER:-ollama}
       CHAT_TEMPERATURE: ${CHAT_TEMPERATURE:-0.1}
-      OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_MODEL_NAME: ${OLLAMA_MODEL_NAME:-qwen2.5:7b-instruct}
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      OLLAMA_MODEL_NAME: ${OLLAMA_MODEL_NAME:-llama3}
       GOOGLE_MODEL_NAME: ${GOOGLE_MODEL_NAME:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
     ports:
@@ -111,6 +111,20 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${FRONTEND_API_BASE_URL:-http://127.0.0.1:8000}
+    container_name: pdf-chatbot-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
 
 volumes:
   postgres_data:
