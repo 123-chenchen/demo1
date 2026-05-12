@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+from loguru import logger
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
-from app.db.models import ChatMessage, ChatSession, Document, MessageRole, MessageSource, User
+from app.db.models import ChatMessage, ChatSession, Document, DocumentStatus, MessageRole, MessageSource, User
 from app.schemas.rag import ChatbotAskRequest
 from app.services.chatbot.generation import generate_answer
 from app.services.retrieval import chunk_candidate_to_dict, retrieval_service
 from app.services.auth import AuthNotFoundError, auth_service
+from app.services.vector_store import VectorStoreError, upsert_document_chunks
 
 
 class ChatbotServiceError(Exception):
@@ -65,6 +67,15 @@ class ChatbotService:
             notebook_id=retrieval_notebook_id,
             public_only=public_only,
         )
+        if not trace.candidates and accessible_document is not None:
+            if self._repair_document_index_if_needed(db, document=accessible_document):
+                trace = retrieval_service.retrieve(
+                    query=request.query,
+                    top_k=request.top_k,
+                    document_id=request.document_id,
+                    notebook_id=retrieval_notebook_id,
+                    public_only=public_only,
+                )
         generation = generate_answer(query=request.query, candidates=trace.candidates)
 
         session_id = request.session_id
@@ -225,6 +236,36 @@ class ChatbotService:
         if selected_notebook is not None and document.notebook_id != selected_notebook.id:
             raise ChatbotServicePermissionError("document does not belong to the selected notebook.")
         return document
+
+    def _repair_document_index_if_needed(self, db: Session, *, document: Document) -> bool:
+        if document.status != DocumentStatus.processed or document.total_chunks <= 0:
+            return False
+
+        indexed_document = db.scalar(
+            select(Document)
+            .options(selectinload(Document.chunks))
+            .where(Document.id == document.id)
+        )
+        if indexed_document is None or not indexed_document.chunks:
+            return False
+
+        try:
+            upsert_document_chunks(document=indexed_document, chunks=list(indexed_document.chunks))
+            for chunk in indexed_document.chunks:
+                db.add(chunk)
+            db.commit()
+            logger.warning(
+                "Reindexed document {} after retrieval returned no candidates.",
+                indexed_document.id,
+            )
+            return True
+        except VectorStoreError as exc:
+            db.rollback()
+            logger.exception("Could not repair retrieval index for document {}: {}", document.id, exc)
+        except Exception as exc:
+            db.rollback()
+            logger.exception("Unexpected retrieval index repair failure for document {}: {}", document.id, exc)
+        return False
 
     def _resolve_requested_notebook(
         self,

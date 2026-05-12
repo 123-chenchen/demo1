@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
+import unicodedata
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
+from loguru import logger
 
 from app.core.config import get_settings
 from app.services.retrieval.models import ChunkCandidate
@@ -37,6 +39,24 @@ def _build_context_block(candidates: list[ChunkCandidate]) -> str:
             f"chunk={candidate.chunk_index}\n{excerpt}"
         )
     return "\n\n".join(lines)
+
+
+def _answer_language_for(query: str) -> str:
+    normalized = query.lower()
+    decomposed = unicodedata.normalize("NFD", normalized)
+    if "đ" in normalized or any(unicodedata.combining(char) for char in decomposed):
+        return "Vietnamese"
+    return "the same language as the question"
+
+
+def _clean_model_answer(answer: str) -> str:
+    cleaned_lines = []
+    for line in answer.splitlines():
+        stripped = line.strip()
+        if stripped.lower().startswith("(vietnamese:") and stripped.endswith(")"):
+            continue
+        cleaned_lines.append(line)
+    return "\n".join(cleaned_lines).strip()
 
 
 def _extractive_fallback(query: str, candidates: list[ChunkCandidate]) -> AnswerGenerationResult:
@@ -105,15 +125,19 @@ def _get_prompt_template() -> ChatPromptTemplate:
         [
             (
                 "system",
-                "You are a grounded retrieval chatbot. "
-                "Answer only from the supplied context. "
-                "If the context is insufficient, say so explicitly. "
-                "Answer in the same language as the user's question. "
-                "Keep the answer concise and cite supporting snippets as [1], [2], ...",
+                "You are a careful document-grounded chatbot. "
+                "Use only the supplied context; do not add outside knowledge. "
+                "If the context does not contain enough evidence, say that the document does not provide enough information. "
+                "Follow the required answer language exactly. "
+                "If the required answer language is Vietnamese, every sentence must be Vietnamese and must not be English. "
+                "Do not include translations, bilingual notes, or parenthetical restatements in another language. "
+                "Write directly, without greetings or preambles. "
+                "Synthesize the relevant facts into 2-5 concise sentences or short bullets. "
+                "Cite every factual claim with supporting snippet numbers like [1], [2].",
             ),
             (
                 "human",
-                "Question:\n{question}\n\nContext:\n{context}",
+                "Required answer language: {answer_language}\n\nQuestion:\n{question}\n\nContext:\n{context}",
             ),
         ]
     )
@@ -121,15 +145,20 @@ def _get_prompt_template() -> ChatPromptTemplate:
 
 def _run_model_chain(*, model, query: str, candidates: list[ChunkCandidate]) -> str:
     chain = _get_prompt_template() | model | StrOutputParser()
-    return chain.invoke(
+    answer = chain.invoke(
         {
             "question": query,
+            "answer_language": _answer_language_for(query),
             "context": _build_context_block(candidates),
         }
-    ).strip()
+    )
+    return _clean_model_answer(answer)
 
 
 def generate_answer(*, query: str, candidates: list[ChunkCandidate]) -> AnswerGenerationResult:
+    if not candidates:
+        return _extractive_fallback(query, candidates)
+
     settings = get_settings()
     provider = (settings.chat_provider or "extractive").strip().lower()
 
@@ -168,7 +197,13 @@ def generate_answer(*, query: str, candidates: list[ChunkCandidate]) -> AnswerGe
                     model_name=settings.ollama_model_name,
                     used_fallback=False,
                 )
-    except Exception:
+    except Exception as exc:
+        logger.exception(
+            "Chat generation failed with provider={} model={}; falling back to extractive response: {}",
+            provider,
+            settings.ollama_model_name if provider == "ollama" else settings.google_model_name,
+            exc,
+        )
         return _extractive_fallback(query, candidates)
 
     return _extractive_fallback(query, candidates)

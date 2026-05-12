@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from app.services.chatbot.generation import _build_context_block, generate_answer
+from app.services.chatbot.generation import (
+    _answer_language_for,
+    _build_context_block,
+    _clean_model_answer,
+    generate_answer,
+)
 from app.services.chatbot.service import _build_session_title
 from app.services.retrieval.models import ChunkCandidate
 
@@ -48,3 +53,13 @@ def test_generate_answer_uses_extract_fallback_when_no_candidates() -> None:
     assert result.provider == "extractive"
     assert result.used_fallback is True
     assert "No relevant context was retrieved" in result.answer
+
+
+def test_answer_language_detects_vietnamese_query() -> None:
+    assert _answer_language_for("Báo cáo nghiên cứu bài toán gì?") == "Vietnamese"
+
+
+def test_clean_model_answer_removes_bilingual_parenthetical_note() -> None:
+    answer = "Tài liệu không cung cấp thông tin này.\n\n(Vietnamese: The document does not provide this information.)"
+
+    assert _clean_model_answer(answer) == "Tài liệu không cung cấp thông tin này."
