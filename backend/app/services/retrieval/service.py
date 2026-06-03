@@ -3,9 +3,9 @@ from __future__ import annotations
 from time import perf_counter
 from uuid import UUID
 
-from app.core.config import get_settings
+from app.config import get_settings
 from app.services.retrieval.models import ChunkCandidate, RetrievalTrace
-from app.services.vector_store import similarity_search
+from app.services.retrieval.vector_store import similarity_search
 
 
 class RetrievalService:

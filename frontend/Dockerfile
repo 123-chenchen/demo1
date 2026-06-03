@@ -2,8 +2,10 @@ FROM node:22-alpine AS build
 
 WORKDIR /app
 
-ARG VITE_API_BASE_URL=http://127.0.0.1:8000
+ARG VITE_API_BASE_URL=
+ARG VITE_AUTH_DISABLED=false
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+ENV VITE_AUTH_DISABLED=$VITE_AUTH_DISABLED
 
 COPY package*.json ./
 RUN npm ci
@@ -13,8 +15,7 @@ RUN npm run build
 
 FROM nginx:1.27-alpine
 
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY config/nginx/default.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 
 EXPOSE 80
-

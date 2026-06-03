@@ -5,7 +5,7 @@ import re
 
 import pytest
 
-from app.services.document_upload import (
+from app.services.documents.upload import (
     DocumentUploadValidationError,
     _build_object_name,
     _inspect_pdf,

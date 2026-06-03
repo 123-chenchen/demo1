@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.core.config import get_settings
+from app.config import get_settings
 
 
 def test_root_redirects_to_demo(client) -> None:

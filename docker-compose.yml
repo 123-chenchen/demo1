@@ -96,6 +96,12 @@ services:
       OLLAMA_MODEL_NAME: ${OLLAMA_MODEL_NAME:-llama3}
       GOOGLE_MODEL_NAME: ${GOOGLE_MODEL_NAME:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
     ports:
       - "8000:8000"
     volumes:
@@ -117,7 +123,8 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        VITE_API_BASE_URL: ${FRONTEND_API_BASE_URL:-http://127.0.0.1:8000}
+        VITE_API_BASE_URL: ${FRONTEND_API_BASE_URL:-}
+        VITE_AUTH_DISABLED: ${VITE_AUTH_DISABLED:-false}
     container_name: pdf-chatbot-frontend
     restart: unless-stopped
     depends_on:

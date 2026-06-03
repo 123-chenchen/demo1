@@ -12,7 +12,7 @@ from pypdf import PdfReader, PdfWriter
 from qdrant_client import QdrantClient
 from sqlalchemy import select
 
-from app.core.config import get_settings
+from app.config import get_settings
 from app.db.models import Document, DocumentChunk, DocumentContent
 from app.db.models.shared import DocumentStatus
 from app.db.session import SessionLocal

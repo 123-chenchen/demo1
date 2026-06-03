@@ -5,8 +5,8 @@ from uuid import UUID, uuid4
 
 from app.crud import document_crud
 from app.db.models.shared import DocumentStatus
-from app.services.document_ingest import document_ingest_service
-from app.services.document_upload import (
+from app.services.retrieval.ingestion import document_ingest_service
+from app.services.documents.upload import (
     DocumentUploadConflictError,
     DocumentUploadStorageError,
     DocumentUploadValidationError,

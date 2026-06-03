@@ -5,11 +5,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.models import ChatMessage, ChatSession, Document, DocumentStatus, MessageRole, MessageSource, User
-from app.schemas.rag import ChatbotAskRequest
-from app.services.chatbot.generation import generate_answer
+from app.schemas import ChatbotAskRequest
+from app.services.ai import generate_answer
 from app.services.retrieval import chunk_candidate_to_dict, retrieval_service
 from app.services.auth import AuthNotFoundError, auth_service
-from app.services.vector_store import VectorStoreError, upsert_document_chunks
+from app.services.retrieval.vector_store import VectorStoreError, upsert_document_chunks
 
 
 class ChatbotServiceError(Exception):

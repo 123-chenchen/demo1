@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.services.auth import (
     AuthAuthenticationError,
     AuthConflictError,
@@ -75,6 +77,27 @@ def test_register_request_maps_conflicts_to_http_409(client, override_db, monkey
     assert response.json()["detail"] == "Email already exists."
 
 
+def test_register_request_maps_database_errors_to_http_503(client, override_db, monkeypatch) -> None:
+    override_db()
+
+    def fake_request_register(db, *, email, password):
+        raise SQLAlchemyError("database is down")
+
+    monkeypatch.setattr(auth_service, "request_register", fake_request_register)
+
+    response = client.post(
+        "/api/auth/register/request",
+        json={
+            "email": "user@example.com",
+            "password": "StrongPass1",
+            "confirm_password": "StrongPass1",
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Authentication database is not available."
+
+
 def test_register_verify_returns_created_user(client, override_db, monkeypatch) -> None:
     override_db()
 
@@ -131,6 +154,23 @@ def test_auth_me_requires_authentication(client, override_db) -> None:
     response = client.get("/api/auth/me")
 
     assert response.status_code == 401
+
+
+def test_auth_me_maps_database_errors_to_http_503(client, override_db, monkeypatch) -> None:
+    override_db()
+
+    def fake_get_current_user_from_access_token(db, *, token):
+        raise SQLAlchemyError("database is down")
+
+    monkeypatch.setattr(auth_service, "get_current_user_from_access_token", fake_get_current_user_from_access_token)
+
+    response = client.get(
+        "/api/auth/me",
+        headers={"Authorization": "Bearer access-token"},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Authentication database is not available."
 
 
 def test_login_returns_tokens(client, override_db, monkeypatch) -> None:

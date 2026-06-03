@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app.api import api_router
-from app.core.config import get_settings
+from app.config import get_settings
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 

@@ -3,9 +3,9 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.core.config import get_settings
+from app.config import get_settings
 from app.db.models import Document, DocumentStatus
-from app.services.vector_store import VectorStoreError, reset_collection, upsert_document_chunks
+from app.services.retrieval.vector_store import VectorStoreError, reset_collection, upsert_document_chunks
 
 
 class RetrievalIndexerError(Exception):

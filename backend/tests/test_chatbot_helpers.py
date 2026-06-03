@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from app.services.chatbot.generation import (
+from app.services.ai.generation import (
     _answer_language_for,
     _build_context_block,
     _clean_model_answer,

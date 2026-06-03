@@ -4,13 +4,14 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.crud.auth import hash_password, verify_password
+from app.crud import hash_password, verify_password
 from app.services.auth import (
     AuthValidationError,
     REGISTER_OTP_PURPOSE,
     _build_name_from_email,
     _build_otp_email_message,
     _generate_otp_code,
+    _smtp_password_for_login,
     _validate_email_format,
     _validate_password_strength,
 )
@@ -51,7 +52,7 @@ def test_build_otp_email_message_contains_otp_and_purpose(monkeypatch) -> None:
         smtp_username = "noreply@example.com"
         smtp_password = "secret"
 
-    monkeypatch.setattr("app.services.auth.get_settings", lambda: FakeSettings())
+    monkeypatch.setattr("app.services.auth.service.get_settings", lambda: FakeSettings())
 
     message = _build_otp_email_message(
         email="user@example.com",
@@ -63,6 +64,16 @@ def test_build_otp_email_message_contains_otp_and_purpose(monkeypatch) -> None:
     assert message["To"] == "user@example.com"
     assert message["Subject"] == "Your OTP code for registration"
     assert "123456" in message.get_content()
+
+
+def test_smtp_password_for_login_removes_gmail_app_password_spaces(monkeypatch) -> None:
+    class FakeSettings:
+        smtp_host = "smtp.gmail.com"
+        smtp_password = "abcd efgh ijkl mnop"
+
+    monkeypatch.setattr("app.services.auth.service.get_settings", lambda: FakeSettings())
+
+    assert _smtp_password_for_login() == "abcdefghijklmnop"
 
 
 def test_verify_password_matches_generated_hash() -> None:

@@ -1,7 +1,10 @@
 node_modules
 dist
+build
 npm-debug.log*
 vite.stdout.log
 vite.stderr.log
 .env
-
+.env.*
+!.env.example
+.git
