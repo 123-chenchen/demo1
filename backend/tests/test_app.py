@@ -3,20 +3,16 @@ from __future__ import annotations
 from app.config import get_settings
 
 
-def test_root_redirects_to_demo(client) -> None:
+def test_root_is_not_registered(client) -> None:
     response = client.get("/", follow_redirects=False)
 
-    assert response.status_code == 307
-    assert response.headers["location"] == "/demo"
+    assert response.status_code == 404
 
 
-def test_demo_page_renders_expected_content(client) -> None:
+def test_demo_page_is_not_registered(client) -> None:
     response = client.get("/demo")
 
-    assert response.status_code == 200
-    assert "PDF Chatbot Demo" in response.text
-    assert "Upload Flow" in response.text
-    assert "Chunk Summary" in response.text
+    assert response.status_code == 404
 
 
 def test_healthcheck_returns_status_ok(client) -> None:
