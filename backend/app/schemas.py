@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.db.models.shared import DocumentStatus, MessageRole
 
-
+#
 class AppSchema(BaseModel):
     model_config = ConfigDict(
         from_attributes=True,
@@ -50,9 +50,11 @@ class AppSchema(BaseModel):
             data["extra_metadata"] = data.pop("metadata")
         return data
 
-
+# 
 class UserCreate(AppSchema):
     email: str
+    name: str | None = None
+    full_name: str | None = None
     password: str = Field(min_length=8)
     is_verified: bool = False
     is_active: bool = True
@@ -62,6 +64,8 @@ class UserCreate(AppSchema):
 
 class UserUpdate(AppSchema):
     email: str | None = None
+    name: str | None = None
+    full_name: str | None = None
     password: str | None = Field(default=None, min_length=8)
     is_verified: bool | None = None
     is_active: bool | None = None
@@ -73,6 +77,7 @@ class UserUpdate(AppSchema):
 class UserRead(AppSchema):
     email: str
     name: str
+    full_name: str | None = None
 
 
 class RefreshTokenCreate(AppSchema):
@@ -145,14 +150,42 @@ class ForgotPasswordVerifyRequest(AppSchema):
         return self
 
 
+class UserSettingsRead(AppSchema):
+    language: Literal["en", "vi"] = "en"
+    theme: Literal["light", "dark"] = "light"
+
+
+class UserSettingsUpdate(AppSchema):
+    language: Literal["en", "vi"] | None = None
+    theme: Literal["light", "dark"] | None = None
+
+
+class ChangePasswordRequest(AppSchema):
+    current_password: str = Field(min_length=8)
+    new_password: str = Field(min_length=8)
+    confirm_new_password: str = Field(min_length=8)
+
+    @model_validator(mode="after")
+    def validate_matching_passwords(self) -> "ChangePasswordRequest":
+        if self.new_password != self.confirm_new_password:
+            raise ValueError("Passwords do not match.")
+        return self
+
+
+class DeleteAccountRequest(AppSchema):
+    current_password: str = Field(min_length=8)
+
+
 class AuthUserRead(AppSchema):
     email: str
     name: str
+    settings: UserSettingsRead = Field(default_factory=UserSettingsRead)
 
 
 class AuthMeRead(AppSchema):
     email: str
     name: str
+    settings: UserSettingsRead = Field(default_factory=UserSettingsRead)
 
 
 class OTPDeliveryResponse(AppSchema):
@@ -362,6 +395,34 @@ class ChatMessageRead(AppSchema):
     created_at: datetime
 
 
+class ChatHistorySourceRead(AppSchema):
+    chunk_id: UUID
+    document_id: UUID
+    document_name: str | None = None
+    original_file_name: str
+    storage_key: str
+    content: str
+    chunk_index: int
+    page_number: int | None = None
+    page_from: int | None = None
+    page_to: int | None = None
+    quoted_text: str | None = None
+    bbox: list[float] | None = None
+    page_width: float | None = None
+    page_height: float | None = None
+    score: float | None = None
+    source: str = "history"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ChatHistoryMessageRead(ChatMessageRead):
+    sources: list[ChatHistorySourceRead] = Field(default_factory=list)
+
+
+class ChatSessionDetailRead(ChatSessionRead):
+    messages: list[ChatHistoryMessageRead] = Field(default_factory=list)
+
+
 class MessageSourceCreate(AppSchema):
     message_id: UUID
     chunk_id: UUID
@@ -391,12 +452,18 @@ class MessageSourceRead(AppSchema):
 class RetrievalChunkRead(AppSchema):
     chunk_id: UUID
     document_id: UUID
+    document_name: str | None = None
     original_file_name: str
     storage_key: str
     content: str
     chunk_index: int
+    page_number: int | None = None
     page_from: int | None = None
     page_to: int | None = None
+    quoted_text: str | None = None
+    bbox: list[float] | None = None
+    page_width: float | None = None
+    page_height: float | None = None
     token_count: int | None = None
     character_count: int | None = None
     score: float | None = None
@@ -404,11 +471,25 @@ class RetrievalChunkRead(AppSchema):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class CitationRead(AppSchema):
+    document_id: UUID
+    document_name: str
+    page_number: int | None = None
+    chunk_id: UUID
+    chunk_index: int
+    text: str
+    quoted_text: str
+    bbox: list[float] | None = None
+    page_width: float | None = None
+    page_height: float | None = None
+
+
 class ChatbotAskRequest(AppSchema):
     query: str = Field(min_length=1)
     top_k: int = Field(default=5, ge=1, le=20)
     notebook_id: UUID | None = None
     document_id: UUID | None = None
+    document_ids: list[UUID] = Field(default_factory=list)
     session_id: UUID | None = None
     save_history: bool = True
 
@@ -418,6 +499,7 @@ class ChatbotAskResponse(AppSchema):
     answer: str
     notebook_id: UUID | None = None
     document_id: UUID | None = None
+    document_ids: list[UUID] = Field(default_factory=list)
     session_id: UUID | None = None
     user_message_id: UUID | None = None
     assistant_message_id: UUID | None = None
@@ -430,6 +512,19 @@ class ChatbotAskResponse(AppSchema):
     retrieval_latency_ms: float
     total_latency_ms: float
     sources: list[RetrievalChunkRead]
+
+
+class ChatbotSuggestionsRequest(AppSchema):
+    notebook_id: UUID | None = None
+    document_id: UUID | None = None
+    document_ids: list[UUID] = Field(default_factory=list)
+    language: Literal["en", "vi"] = "en"
+
+
+class ChatbotSuggestionsResponse(AppSchema):
+    title: str
+    topics: list[str] = Field(default_factory=list)
+    questions: list[str] = Field(default_factory=list)
 
 
 class ReindexResponse(AppSchema):

@@ -1,21 +1,32 @@
 from __future__ import annotations
 
+from io import BytesIO
+from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
+from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.api.dependencies import get_current_user, get_current_user_optional, get_db
 from app.crud import CrudConflictError, chat_session_crud, document_content_crud, document_crud, notebook_crud
-from app.db.models import User
+from app.db.models import ChatMessage, ChatSession, MessageSource, Notebook, User
+from app.db.models.document import DocumentChunk
 from app.schemas import (
     AuthMeRead,
+    CitationRead,
+    ChangePasswordRequest,
     ChatSessionCreate,
+    ChatSessionDetailRead,
     ChatSessionRead,
     ChatSessionUpdate,
     ChatbotAskRequest,
     ChatbotAskResponse,
+    ChatbotSuggestionsRequest,
+    ChatbotSuggestionsResponse,
+    DeleteAccountRequest,
     DocumentContentRead,
     DocumentRead,
     DocumentUpdate,
@@ -31,6 +42,8 @@ from app.schemas import (
     RegisterRequest,
     RegisterVerifyRequest,
     RegisterVerifyResponse,
+    UserSettingsRead,
+    UserSettingsUpdate,
 )
 from app.services.auth import (
     AuthAuthenticationError,
@@ -48,6 +61,7 @@ from app.services.documents import (
     document_upload_service,
 )
 from app.services.retrieval.ingestion import document_ingest_service
+from app.services.storage import StorageServiceError, get_object_buffer, parse_storage_key
 
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
 notebooks_router = APIRouter(prefix="/notebooks", tags=["notebooks"])
@@ -68,11 +82,81 @@ def _raise_auth_database_error(exc: SQLAlchemyError) -> None:
 @auth_router.get("/me", response_model=AuthMeRead, response_model_by_alias=False)
 def get_authenticated_user(
     current_user: User = Depends(get_current_user),
-) -> dict[str, str]:
+) -> dict[str, object]:
     return {
         "email": current_user.email,
-        "name": auth_service.build_name_from_email(current_user.email),
+        "name": auth_service.resolve_user_display_name(current_user),
+        "settings": auth_service.get_user_settings(current_user),
     }
+
+
+@auth_router.get("/settings", response_model=UserSettingsRead, response_model_by_alias=False)
+def get_user_settings(
+    current_user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    return auth_service.get_user_settings(current_user)
+
+
+@auth_router.patch("/settings", response_model=UserSettingsRead, response_model_by_alias=False)
+def update_user_settings(
+    payload: UserSettingsUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    try:
+        return auth_service.update_user_settings(
+            db,
+            user=current_user,
+            language=payload.language,
+            theme=payload.theme,
+        )
+    except AuthConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except SQLAlchemyError as exc:
+        _raise_auth_database_error(exc)
+
+
+@auth_router.post("/change-password", response_model=MessageResponse, response_model_by_alias=False)
+def change_password(
+    payload: ChangePasswordRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    try:
+        return auth_service.change_password(
+            db,
+            user=current_user,
+            current_password=payload.current_password,
+            new_password=payload.new_password,
+        )
+    except AuthAuthenticationError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    except AuthValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except AuthConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except SQLAlchemyError as exc:
+        _raise_auth_database_error(exc)
+
+
+@auth_router.delete("/account", response_model=MessageResponse, response_model_by_alias=False)
+def delete_account(
+    payload: DeleteAccountRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    try:
+        return auth_service.delete_account(
+            db,
+            user=current_user,
+            current_password=payload.current_password,
+        )
+    except AuthAuthenticationError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    except AuthConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except SQLAlchemyError as exc:
+        _raise_auth_database_error(exc)
 
 
 @auth_router.post("/register/request", response_model=OTPDeliveryResponse, response_model_by_alias=False)
@@ -249,8 +333,8 @@ def update_notebook(
     except CrudConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
-
-def _resolve_selected_notebook_id(
+# Hàm _resolve_selected_notebook_id sẽ được sử dụng trong các API có nhận tham số notebook_id để xác định xem notebook_id đó có hợp lệ và thuộc về người dùng hiện tại hay không. Nếu notebook_id không hợp lệ hoặc không thuộc về người dùng, nó sẽ ném ra lỗi HTTP 404 Not Found với thông điệp chi tiết. Nếu notebook_id hợp lệ, nó sẽ trả về UUID của notebook đó để các API khác có thể sử dụng để truy vấn dữ liệu liên quan đến notebook.
+def _resolve_selected_notebook_id( 
     db: Session,
     *,
     current_user: User | None,
@@ -323,6 +407,124 @@ def get_document(
     return document
 
 
+@documents_router.get("/{item_id}/file")
+def get_document_file(
+    item_id: UUID,
+    notebook_id: UUID | None = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user_optional),
+) -> StreamingResponse:
+    if current_user is None:
+        document = document_crud.get_for_scope(
+            db,
+            obj_id=item_id,
+            notebook_id=None,
+        )
+    else:
+        document = document_crud.get_for_user(
+            db,
+            obj_id=item_id,
+            user_id=current_user.id,
+            notebook_id=notebook_id,
+        )
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document not found.")
+
+    try:
+        bucket_name, object_name = parse_storage_key(document.storage_key)
+        file_buffer = get_object_buffer(bucket_name, object_name)
+    except StorageServiceError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+    filename = quote(document.original_file_name)
+    return StreamingResponse(
+        _iter_buffer(file_buffer),
+        media_type=document.mime_type or "application/pdf",
+        headers={
+            "Content-Disposition": f"inline; filename*=UTF-8''{filename}",
+            "Cache-Control": "private, max-age=300",
+        },
+    )
+
+
+@documents_router.get("/{item_id}/pdf")
+def get_document_pdf(
+    item_id: UUID,
+    notebook_id: UUID | None = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user_optional),
+) -> StreamingResponse:
+    return get_document_file(
+        item_id=item_id,
+        notebook_id=notebook_id,
+        db=db,
+        current_user=current_user,
+    )
+
+
+@documents_router.get(
+    "/{item_id}/citation/{chunk_id}",
+    response_model=CitationRead,
+    response_model_by_alias=False,
+)
+def get_document_citation(
+    item_id: UUID,
+    chunk_id: UUID,
+    notebook_id: UUID | None = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user_optional),
+) -> dict[str, object]:
+    if current_user is None:
+        document = document_crud.get_for_scope(
+            db,
+            obj_id=item_id,
+            notebook_id=None,
+        )
+    else:
+        document = document_crud.get_for_user(
+            db,
+            obj_id=item_id,
+            user_id=current_user.id,
+            notebook_id=notebook_id,
+        )
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document not found.")
+
+    chunk = db.scalar(
+        select(DocumentChunk).where(
+            DocumentChunk.id == chunk_id,
+            DocumentChunk.document_id == document.id,
+        )
+    )
+    if chunk is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="citation not found.")
+
+    metadata = dict(chunk.extra_metadata or {})
+    return {
+        "document_id": document.id,
+        "document_name": _document_display_title(document),
+        "page_number": chunk.page_from,
+        "chunk_id": chunk.id,
+        "chunk_index": chunk.chunk_index,
+        "text": chunk.content,
+        "quoted_text": metadata.get("quoted_text") or chunk.content,
+        "bbox": metadata.get("bbox"),
+        "page_width": metadata.get("page_width"),
+        "page_height": metadata.get("page_height"),
+    }
+
+
+def _iter_buffer(file_buffer: BytesIO, chunk_size: int = 1024 * 1024):
+    try:
+        while True:
+            chunk = file_buffer.read(chunk_size)
+            if not chunk:
+                break
+            yield chunk
+    finally:
+        file_buffer.close()
+
+
 @documents_router.patch("/{item_id}", response_model=DocumentRead, response_model_by_alias=False)
 def update_document(
     item_id: UUID,
@@ -390,7 +592,7 @@ def upload_document_pdf(
             current_user=current_user,
             notebook_id=notebook_id,
         )
-        return document_upload_service.upload_pdf(
+        return document_upload_service.upload_pdf( # upload PDF sẽ bao gồm cả việc validate file, upload file lên MinIO và tạo record Document trong database, nên có thể sẽ mất nhiều thời gian hơn so với các API khác, cần cân nhắc về việc có nên xử lý upload file và tạo record Document thành 2 bước riêng biệt hay không để cải thiện trải nghiệm người dùng
             db,
             upload_file=file,
             notebook_id=resolved_notebook_id,
@@ -515,6 +717,68 @@ def list_chat_sessions(
     )
 
 
+def _serialize_chat_session_detail(session: ChatSession) -> dict[str, object]:
+    return {
+        "id": session.id,
+        "notebook_id": session.notebook_id,
+        "title": session.title,
+        "metadata": session.extra_metadata,
+        "created_at": session.created_at,
+        "updated_at": session.updated_at,
+        "messages": [
+            {
+                "id": message.id,
+                "session_id": message.session_id,
+                "reply_to_message_id": message.reply_to_message_id,
+                "role": message.role,
+                "content": message.content,
+                "model_name": message.model_name,
+                "prompt_tokens": message.prompt_tokens,
+                "completion_tokens": message.completion_tokens,
+                "total_tokens": message.total_tokens,
+                "metadata": message.extra_metadata,
+                "created_at": message.created_at,
+                "sources": [_serialize_history_source(source) for source in sorted(message.sources, key=lambda item: item.source_rank)],
+            }
+            for message in session.messages
+        ],
+    }
+
+
+def _serialize_history_source(source: MessageSource) -> dict[str, object]:
+    chunk = source.chunk
+    document = chunk.document
+    metadata = dict(chunk.extra_metadata or {})
+    return {
+        "chunk_id": chunk.id,
+        "document_id": document.id,
+        "document_name": _document_display_title(document),
+        "original_file_name": document.original_file_name,
+        "storage_key": document.storage_key,
+        "content": chunk.content,
+        "chunk_index": chunk.chunk_index,
+        "page_number": chunk.page_from,
+        "page_from": chunk.page_from,
+        "page_to": chunk.page_to,
+        "quoted_text": metadata.get("quoted_text") or source.snippet or chunk.content,
+        "bbox": metadata.get("bbox"),
+        "page_width": metadata.get("page_width"),
+        "page_height": metadata.get("page_height"),
+        "score": source.score,
+        "source": "history",
+        "metadata": metadata,
+    }
+
+
+def _document_display_title(document: object) -> str:
+    metadata = dict(getattr(document, "extra_metadata", None) or {})
+    for key in ("display_title", "title", "document_title", "pdf_title", "extracted_title", "subject", "topic"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return " ".join(value.split())
+    return getattr(document, "original_file_name", None) or "Referenced PDF"
+
+
 @chat_sessions_router.post(
     "/",
     response_model=ChatSessionRead,
@@ -543,19 +807,40 @@ def create_chat_session(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
-@chat_sessions_router.get("/{item_id}", response_model=ChatSessionRead, response_model_by_alias=False)
+@chat_sessions_router.get("/{item_id}", response_model=ChatSessionDetailRead, response_model_by_alias=False)
 def get_chat_session(
     item_id: UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> object:
-    db_obj = chat_session_crud.get_for_user(db, obj_id=item_id, user_id=current_user.id)
-    if db_obj is None:
+) -> dict[str, object]:
+    existing_session = chat_session_crud.get_for_user(
+        db,
+        obj_id=item_id,
+        user_id=current_user.id,
+    )
+    if existing_session is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="chat session not found.",
         )
-    return db_obj
+
+    db_obj = db.scalar(
+        select(ChatSession)
+        .join(Notebook)
+        .options(
+            selectinload(ChatSession.messages)
+            .selectinload(ChatMessage.sources)
+            .selectinload(MessageSource.chunk)
+            .selectinload(DocumentChunk.document)
+        )
+        .where(
+            ChatSession.id == item_id,
+            Notebook.user_id == current_user.id,
+        )
+    )
+    if db_obj is None:
+        db_obj = existing_session
+    return _serialize_chat_session_detail(db_obj)
 
 
 @chat_sessions_router.patch("/{item_id}", response_model=ChatSessionRead, response_model_by_alias=False)
@@ -614,6 +899,26 @@ def ask_chatbot(
 
     try:
         return chatbot_service.ask(db, request=payload, current_user=current_user)
+    except ChatbotServicePermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except ChatbotServiceError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@chatbot_router.post("/suggestions", response_model=ChatbotSuggestionsResponse, response_model_by_alias=False)
+def suggest_chatbot_questions(
+    payload: ChatbotSuggestionsRequest,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user_optional),
+) -> dict[str, object]:
+    from app.services.chatbot.service import (
+        ChatbotServiceError,
+        ChatbotServicePermissionError,
+        chatbot_service,
+    )
+
+    try:
+        return chatbot_service.suggest_questions(db, request=payload, current_user=current_user)
     except ChatbotServicePermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except ChatbotServiceError as exc:

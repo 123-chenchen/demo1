@@ -5,6 +5,7 @@ import { useAppContext } from '../../app/AppContext.jsx';
 export function ProfilePage() {
   const { header } = useAppContext();
   const user = header.user;
+  const displayName = resolveUserDisplayName(user);
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-4 lg:px-6">
@@ -12,8 +13,7 @@ export function ProfilePage() {
         <h2 className="text-xl font-bold">Profile</h2>
         <dl className="mt-4 space-y-3 text-sm">
           <ProfileRow label="Email" value={user?.email || 'Unknown'} />
-          <ProfileRow label="Name" value={user?.name || 'Not set'} />
-          <ProfileRow label="Mode" value={header.isAuthDisabled ? 'Guest access' : 'Authenticated user'} />
+          <ProfileRow label="Name" value={displayName || 'Not set'} />
         </dl>
       </section>
     </main>
@@ -27,4 +27,15 @@ function ProfileRow({ label, value }) {
       <dd className="font-semibold text-zinc-900">{value}</dd>
     </div>
   );
+}
+
+function resolveUserDisplayName(user) {
+  const profileName = user?.profile?.name || user?.google_profile?.name || user?.googleProfile?.name;
+  const value = user?.name || user?.full_name || profileName || emailPrefix(user?.email);
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function emailPrefix(email) {
+  if (!email) return '';
+  return email.split('@')[0].split('+')[0].replace(/[._-]+/g, ' ').trim();
 }

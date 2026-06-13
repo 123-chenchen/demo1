@@ -5,7 +5,6 @@ description = "Backend bootstrap for a PDF chatbot"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "alembic>=1.18.4",
     "bcrypt>=5.0.0",
     "fastapi>=0.135.3",
     "httpx>=0.28.1",
@@ -29,7 +28,9 @@ dependencies = [
     "sentence-transformers>=5.1.2",
     "sqlalchemy>=2.0.49",
     "tiktoken>=0.12.0",
+    "torch>=2.11.0",
     "uvicorn[standard]>=0.44.0",
+    "pymupdf>=1.27.2.3",
 ]
 
 [project.scripts]
@@ -52,3 +53,11 @@ testpaths = ["tests"]
 markers = [
     "integration: requires live backend services, database, Qdrant, and a configured LLM",
 ]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }

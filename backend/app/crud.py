@@ -393,6 +393,7 @@ class ChatSessionCRUD(CRUDBase[ChatSession, ChatSessionCreate, ChatSessionUpdate
         statement = select(ChatSession).join(Notebook).where(Notebook.user_id == user_id)
         if notebook_id is not None:
             statement = statement.where(ChatSession.notebook_id == notebook_id)
+        statement = statement.order_by(ChatSession.updated_at.desc(), ChatSession.created_at.desc())
         statement = statement.offset(skip).limit(limit)
         return list(db.scalars(statement).all())
 

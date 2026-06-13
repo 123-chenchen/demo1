@@ -87,15 +87,32 @@ def get_vector_store() -> QdrantVectorStore:
 
 
 def _build_payload_metadata(document: Document, chunk: DocumentChunk) -> dict[str, object]:
+    chunk_metadata = dict(chunk.extra_metadata or {})
+    document_metadata = dict(document.extra_metadata or {})
+    display_title = (
+        document_metadata.get("display_title")
+        or document_metadata.get("title")
+        or document_metadata.get("pdf_title")
+        or document_metadata.get("extracted_title")
+        or document.original_file_name
+    )
     return {
         "chunk_id": str(chunk.id),
-        "document_id": str(document.id),
-        "notebook_id": str(document.notebook_id) if document.notebook_id else None,
         "chunk_index": chunk.chunk_index,
+        "document_id": str(document.id),
+        "document_name": str(display_title),
+        "display_title": str(display_title),
+        "notebook_id": str(document.notebook_id) if document.notebook_id else None,
+        "page_number": chunk.page_from,
         "page_from": chunk.page_from,
         "page_to": chunk.page_to,
         "storage_key": document.storage_key,
         "original_file_name": document.original_file_name,
+        "quoted_text": chunk_metadata.get("quoted_text") or chunk.content,
+        "text": chunk.content,
+        "bbox": chunk_metadata.get("bbox"),
+        "page_width": chunk_metadata.get("page_width"),
+        "page_height": chunk_metadata.get("page_height"),
         "token_count": chunk.token_count,
         "character_count": chunk.character_count,
         "embedding_model": get_settings().embedding_model_name,
@@ -149,16 +166,27 @@ def upsert_document_chunks(*, document: Document, chunks: Sequence[DocumentChunk
 def build_document_filter(
     *,
     document_id: UUID | None,
+    document_ids: Sequence[UUID] | None = None,
     notebook_id: UUID | None = None,
     public_only: bool = False,
 ) -> models.Filter | None:
     must_conditions: list[object] = []
-
+    scoped_document_ids = {str(item) for item in (document_ids or [])}
     if document_id is not None:
+        scoped_document_ids.add(str(document_id))
+
+    if len(scoped_document_ids) == 1:
         must_conditions.append(
             models.FieldCondition(
                 key=f"{LANGCHAIN_METADATA_KEY}.document_id",
-                match=models.MatchValue(value=str(document_id)),
+                match=models.MatchValue(value=next(iter(scoped_document_ids))),
+            )
+        )
+    elif len(scoped_document_ids) > 1:
+        must_conditions.append(
+            models.FieldCondition(
+                key=f"{LANGCHAIN_METADATA_KEY}.document_id",
+                match=models.MatchAny(any=sorted(scoped_document_ids)),
             )
         )
 
@@ -195,6 +223,7 @@ def similarity_search(
     query: str,
     limit: int,
     document_id: UUID | None = None,
+    document_ids: Sequence[UUID] | None = None,
     notebook_id: UUID | None = None,
     public_only: bool = False,
 ) -> list[tuple[LangChainDocument, float]]:
@@ -206,6 +235,7 @@ def similarity_search(
             k=limit,
             filter=build_document_filter(
                 document_id=document_id,
+                document_ids=document_ids,
                 notebook_id=notebook_id,
                 public_only=public_only,
             ),

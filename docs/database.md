@@ -218,7 +218,7 @@ Stores chunks used to generate an assistant response. This supports retrieval tr
 
 ## Design Notes
 
-- `metadata` uses `jsonb` in several tables so the model can evolve without immediate schema migrations.
+- `metadata` uses `jsonb` in several tables so the model can evolve without immediate database versioning.
 - `document_contents` exists so the system can re-chunk, re-embed, or debug extraction without reading the source PDF again.
 - `qdrant_point_id` stores the mapping to the vector store; embeddings are not stored in PostgreSQL.
 - `message_sources` is important for explainability because it records which chunks supported an answer.

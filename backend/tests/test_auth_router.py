@@ -145,7 +145,14 @@ def test_auth_me_returns_authenticated_user(client, override_db, monkeypatch) ->
     )
 
     assert response.status_code == 200
-    assert response.json() == {"email": "user@example.com", "name": "User"}
+    assert response.json() == {
+        "email": "user@example.com",
+        "name": "User",
+        "settings": {
+            "language": "en",
+            "theme": "light",
+        },
+    }
 
 
 def test_auth_me_requires_authentication(client, override_db) -> None:
@@ -312,3 +319,36 @@ def test_forgot_password_verify_maps_invalid_otp_to_http_400(client, override_db
 
     assert response.status_code == 400
     assert response.json()["detail"] == "OTP is invalid."
+
+
+def test_delete_account_calls_backend_and_returns_success(client, override_db, monkeypatch) -> None:
+    override_db()
+    current_user = SimpleNamespace(
+        id=uuid4(),
+        email="delete.me@example.com",
+        name="Delete Me",
+        is_verified=True,
+        extra_metadata={},
+    )
+
+    def fake_get_current_user_from_access_token(db, *, token):
+        assert token == "access-token"
+        return current_user
+
+    def fake_delete_account(db, *, user, current_password):
+        assert user is current_user
+        assert current_password == "StrongPass1"
+        return {"message": "Account has been deleted successfully."}
+
+    monkeypatch.setattr(auth_service, "get_current_user_from_access_token", fake_get_current_user_from_access_token)
+    monkeypatch.setattr(auth_service, "delete_account", fake_delete_account)
+
+    response = client.request(
+        "DELETE",
+        "/api/auth/account",
+        json={"current_password": "StrongPass1"},
+        headers={"Authorization": "Bearer access-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "Account has been deleted successfully."

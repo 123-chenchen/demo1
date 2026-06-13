@@ -71,3 +71,32 @@ export function apiFetch(path, options = {}, accessToken = '') {
     })
     .then(parseResponse);
 }
+
+export async function apiFetchBlob(path, options = {}, accessToken = '') {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...options,
+    headers: {
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      ...(options.headers || {}),
+    },
+  }).catch((error) => {
+    if (error instanceof TypeError) {
+      const target = API_BASE_URL || globalThis.location?.origin || '/api';
+      throw new Error(`Cannot reach backend at ${target}. Check that the backend or API proxy is running.`);
+    }
+    throw error;
+  });
+
+  if (!response.ok) {
+    let detail = `Request failed with status ${response.status}`;
+    try {
+      const data = await response.json();
+      detail = data?.detail || detail;
+    } catch {
+      // Keep the status-based fallback for non-JSON file responses.
+    }
+    throw new Error(detail);
+  }
+
+  return response.blob();
+}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import uuid
 
 from pypdf.errors import PdfReadError
@@ -18,7 +19,7 @@ from app.services.retrieval.vector_store import (
     upsert_document_chunks,
 )
 from app.services.storage import StorageServiceError, get_object_buffer, parse_storage_key
-from app.utils.pdf import PdfReadServiceError, extract_pdf_pages
+from app.utils.pdf import PdfReadServiceError, extract_pdf_metadata, extract_pdf_pages
 
 
 class DocumentIngestError(Exception):
@@ -50,10 +51,18 @@ class DocumentIngestService:
         try:
             bucket_name, object_name = parse_storage_key(document.storage_key)
             file_buffer = get_object_buffer(bucket_name, object_name)
+            pdf_metadata = extract_pdf_metadata(file_buffer)
             page_entries = self._extract_pages(file_buffer)
             raw_text = "\n\n".join(entry["text"] for entry in page_entries).strip()
             if not raw_text:
                 raise DocumentIngestError("No extractable text was found in the PDF.")
+            extracted_title = _extract_title_from_pages(page_entries)
+            display_title = _choose_display_title(
+                metadata=metadata,
+                pdf_metadata=pdf_metadata,
+                extracted_title=extracted_title,
+                fallback=document.original_file_name,
+            )
 
             chunks = self._build_chunks(page_entries)
             if not chunks:
@@ -103,6 +112,9 @@ class DocumentIngestService:
             metadata.pop("ingest_error", None)
             metadata.update(
                 {
+                    **pdf_metadata,
+                    "extracted_title": extracted_title,
+                    "display_title": display_title,
                     "extractor_name": self.extractor_name,
                     "bucket_name": bucket_name,
                     "object_name": object_name,
@@ -177,3 +189,49 @@ class DocumentIngestService:
 
 
 document_ingest_service = DocumentIngestService()
+
+
+def _choose_display_title(
+    *,
+    metadata: dict,
+    pdf_metadata: dict[str, str],
+    extracted_title: str | None,
+    fallback: str,
+) -> str:
+    for key in ("display_title", "title", "document_title", "subject", "topic"):
+        title = _clean_title(metadata.get(key))
+        if title:
+            return title
+    for key in ("pdf_title", "title"):
+        title = _clean_title(pdf_metadata.get(key))
+        if title:
+            return title
+    title = _clean_title(extracted_title)
+    if title:
+        return title
+    return fallback
+
+
+def _extract_title_from_pages(page_entries: list[dict[str, object]]) -> str | None:
+    if not page_entries:
+        return None
+    first_page_text = str(page_entries[0].get("text") or "")
+    candidates: list[str] = []
+    for line in first_page_text.splitlines()[:12]:
+        candidate = _clean_title(line)
+        if candidate and 2 <= len(candidate.split()) <= 18:
+            candidates.append(candidate)
+    return candidates[0] if candidates else None
+
+
+def _clean_title(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    title = " ".join(value.replace("\x00", " ").split()).strip(" -:;,.")
+    if not title or ".pdf" in title.lower():
+        return None
+    if re.fullmatch(r"[\d.\-_vV]+", title):
+        return None
+    if len(title) < 4 or len(title) > 160:
+        return None
+    return title

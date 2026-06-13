@@ -1,0 +1,324 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FileText, Loader2, Maximize2, ZoomIn, ZoomOut } from 'lucide-react';
+import * as pdfjsLib from 'pdfjs-dist';
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+
+import { ACCESS_TOKEN_KEY, apiFetchBlob } from '../api.js';
+import { displayDocumentTitle } from '../documentTitles.js';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+
+const pdfDocumentCache = new Map();
+const objectUrlCache = new Map();
+
+export function PdfCitationViewer({ document, activeCitation }) {
+  const containerRef = useRef(null);
+  const [pdfDocument, setPdfDocument] = useState(null);
+  const [pageCount, setPageCount] = useState(0);
+  const [pageSizes, setPageSizes] = useState({});
+  const [currentPage, setCurrentPage] = useState(1);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const [zoom, setZoom] = useState(1);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!document?.id) {
+      setPdfDocument(null);
+      setPageCount(0);
+      setPageSizes({});
+      setCurrentPage(1);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoading(true);
+    setError('');
+    setPageSizes({});
+    setCurrentPage(1);
+    setZoom(1);
+
+    loadPdfDocument(document.id)
+      .then((loadedPdf) => {
+        if (cancelled) return;
+        setPdfDocument(loadedPdf);
+        setPageCount(loadedPdf.numPages);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err.message);
+          setPdfDocument(null);
+          setPageCount(0);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [document?.id]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return undefined;
+
+    const updateWidth = () => setContainerWidth(container.clientWidth);
+    updateWidth();
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return undefined;
+
+    const updateCurrentPage = () => {
+      const pages = Array.from(container.querySelectorAll('[data-page-number]'));
+      const marker = container.scrollTop + Math.max(120, container.clientHeight * 0.2);
+      const activePage = pages.reduce((current, page) => {
+        const pageNumber = Number(page.getAttribute('data-page-number') || current);
+        return page.offsetTop <= marker ? pageNumber : current;
+      }, 1);
+      setCurrentPage(activePage);
+    };
+
+    updateCurrentPage();
+    container.addEventListener('scroll', updateCurrentPage, { passive: true });
+    return () => container.removeEventListener('scroll', updateCurrentPage);
+  }, [pageCount]);
+
+  useEffect(() => {
+    requestAnimationFrame(() => scrollToActiveCitation(containerRef.current, activeCitation, pageSizes));
+  }, [activeCitation, pageSizes]);
+
+  const registerPageSize = useCallback((pageNumber, nextSize) => {
+    setPageSizes((current) => {
+      const previous = current[pageNumber];
+      if (
+        previous &&
+        Math.round(previous.width) === Math.round(nextSize.width) &&
+        Math.round(previous.height) === Math.round(nextSize.height)
+      ) {
+        return current;
+      }
+      return { ...current, [pageNumber]: nextSize };
+    });
+  }, []);
+
+  const pageNumbers = useMemo(() => Array.from({ length: pageCount }, (_, index) => index + 1), [pageCount]);
+
+  return (
+    <section className="flex h-full min-h-0 flex-col rounded-lg border border-zinc-200 bg-white shadow-sm">
+      <div className="flex flex-col justify-between gap-3 border-b border-zinc-200 px-4 py-3 sm:flex-row sm:items-center">
+        <div className="min-w-0">
+          <h3 className="truncate text-base font-bold text-zinc-950">{document ? displayDocumentTitle(document) : 'PDF viewer'}</h3>
+          <p className="text-sm text-zinc-500">
+            {pageCount ? `Page ${currentPage}/${pageCount}` : activeCitation ? 'Opening citation...' : 'Select a PDF source to preview it.'}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <IconButton label="Fit width" onClick={() => setZoom(1)}>
+            <Maximize2 size={16} />
+          </IconButton>
+          <IconButton label="Zoom out" onClick={() => setZoom((current) => Math.max(0.65, Number((current - 0.15).toFixed(2))))}>
+            <ZoomOut size={16} />
+          </IconButton>
+          <span className="w-12 text-center text-xs font-semibold text-zinc-600">{Math.round(zoom * 100)}%</span>
+          <IconButton label="Zoom in" onClick={() => setZoom((current) => Math.min(2.25, Number((current + 0.15).toFixed(2))))}>
+            <ZoomIn size={16} />
+          </IconButton>
+        </div>
+      </div>
+
+      <div ref={containerRef} className="relative min-h-0 flex-1 overflow-auto bg-zinc-100 p-4">
+        {error && (
+          <div className="flex gap-2 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
+            <FileText className="mt-0.5 shrink-0" size={18} />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {!document && (
+          <div className="flex h-full min-h-[360px] items-center justify-center text-center">
+            <div className="max-w-xs">
+              <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-lg bg-white text-zinc-700 shadow-sm">
+                <FileText size={22} />
+              </div>
+              <h3 className="mt-4 text-base font-bold text-zinc-950">Studio preview</h3>
+              <p className="mt-2 text-sm leading-6 text-zinc-500">
+                Select a source from the left panel. Citations will open and scroll to the relevant passage here.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {document && pdfDocument && (
+          <div className="mx-auto w-full">
+            {pageNumbers.map((pageNumber) => (
+              <PdfPage
+                key={`${document.id}-${pageNumber}`}
+                pdfDocument={pdfDocument}
+                pageNumber={pageNumber}
+                containerWidth={containerWidth}
+                zoom={zoom}
+                onPageSize={registerPageSize}
+              />
+            ))}
+          </div>
+        )}
+
+        {isLoading && (
+          <div className="absolute left-4 top-4 inline-flex items-center gap-2 rounded-md bg-white px-3 py-2 text-sm font-semibold text-zinc-600 shadow-sm">
+            <Loader2 className="animate-spin" size={16} />
+            Loading PDF...
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function PdfPage({ pdfDocument, pageNumber, containerWidth, zoom, onPageSize }) {
+  const canvasRef = useRef(null);
+  const renderTaskRef = useRef(null);
+  const [pageSize, setPageSize] = useState({ width: 0, height: 0, baseWidth: 0, baseHeight: 0 });
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!pdfDocument || !canvasRef.current || !containerWidth) return undefined;
+
+    let cancelled = false;
+    const canvas = canvasRef.current;
+    const context = canvas.getContext('2d');
+
+    if (renderTaskRef.current) {
+      renderTaskRef.current.cancel();
+      renderTaskRef.current = null;
+    }
+
+    pdfDocument
+      .getPage(pageNumber)
+      .then((page) => {
+        if (cancelled) return null;
+        const baseViewport = page.getViewport({ scale: 1 });
+        const availableWidth = Math.max(280, containerWidth - 32);
+        const scale = Math.max(0.35, (availableWidth / baseViewport.width) * zoom);
+        const viewport = page.getViewport({ scale });
+        const outputScale = window.devicePixelRatio || 1;
+
+        canvas.width = Math.floor(viewport.width * outputScale);
+        canvas.height = Math.floor(viewport.height * outputScale);
+        canvas.style.width = `${viewport.width}px`;
+        canvas.style.height = `${viewport.height}px`;
+        context.setTransform(outputScale, 0, 0, outputScale, 0, 0);
+
+        const nextSize = {
+          width: viewport.width,
+          height: viewport.height,
+          baseWidth: baseViewport.width,
+          baseHeight: baseViewport.height,
+        };
+        setPageSize(nextSize);
+        onPageSize(pageNumber, nextSize);
+
+        const renderTask = page.render({ canvasContext: context, viewport });
+        renderTaskRef.current = renderTask;
+        return renderTask.promise;
+      })
+      .then(() => {
+        if (!cancelled) setError('');
+      })
+      .catch((err) => {
+        if (!cancelled && err?.name !== 'RenderingCancelledException') {
+          setError(err.message);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          renderTaskRef.current = null;
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      if (renderTaskRef.current) {
+        renderTaskRef.current.cancel();
+        renderTaskRef.current = null;
+      }
+    };
+  }, [pdfDocument, pageNumber, containerWidth, zoom, onPageSize]);
+
+  return (
+    <div data-page-number={pageNumber} className="relative mx-auto mb-4 w-fit bg-white shadow-sm">
+      <canvas ref={canvasRef} className="block" />
+      <span className="absolute bottom-2 right-2 rounded bg-zinc-950/70 px-2 py-1 text-xs font-semibold text-white">
+        {pageNumber}
+      </span>
+      {error && (
+        <div className="absolute inset-0 flex items-center justify-center bg-white/90 p-4 text-sm text-rose-700">
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
+async function loadPdfDocument(documentId) {
+  if (pdfDocumentCache.has(documentId)) {
+    return pdfDocumentCache.get(documentId);
+  }
+
+  let objectUrl = objectUrlCache.get(documentId);
+  if (!objectUrl) {
+    const blob = await apiFetchBlob(`/api/documents/${documentId}/pdf`, {}, localStorage.getItem(ACCESS_TOKEN_KEY) || '');
+    objectUrl = URL.createObjectURL(blob);
+    objectUrlCache.set(documentId, objectUrl);
+  }
+
+  const loadingTask = pdfjsLib.getDocument({ url: objectUrl });
+  const pdf = await loadingTask.promise;
+  pdfDocumentCache.set(documentId, pdf);
+  return pdf;
+}
+
+function IconButton({ label, disabled, onClick, children }) {
+  return (
+    <button
+      type="button"
+      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-200 bg-white text-zinc-700 hover:border-teal-300 hover:text-teal-800 disabled:cursor-not-allowed disabled:opacity-40"
+      disabled={disabled}
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+    >
+      {children}
+    </button>
+  );
+}
+
+function scrollToActiveCitation(container, citation, pageSizes) {
+  const pageNumber = citationPageNumber(citation);
+  if (!container || !pageNumber) return;
+
+  const pageElement = container.querySelector(`[data-page-number="${pageNumber}"]`);
+  if (!pageElement) return;
+
+  const pageSize = pageSizes[pageNumber];
+  if (!citation?.bbox || !pageSize?.height) {
+    container.scrollTo({ top: Math.max(0, pageElement.offsetTop - 16), behavior: 'smooth' });
+    return;
+  }
+
+  const pageHeight = citation.page_height || pageSize.baseHeight || pageSize.height;
+  const citationTop = (citation.bbox[1] / pageHeight) * pageSize.height;
+  container.scrollTo({ top: Math.max(0, pageElement.offsetTop + citationTop - 120), behavior: 'smooth' });
+}
+
+function citationPageNumber(citation) {
+  return citation?.page_number || citation?.page_from || citation?.page_to || null;
+}

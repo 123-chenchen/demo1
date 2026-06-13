@@ -10,6 +10,7 @@ import {
   persistStoredSession,
   readStoredJson,
 } from './api.js';
+import { displayDocumentListTitle } from './documentTitles.js';
 
 const guestUser = {
   email: 'guest@local',
@@ -17,9 +18,20 @@ const guestUser = {
   isGuest: true,
 };
 
+const defaultUserSettings = {
+  language: 'en',
+  theme: 'light',
+};
+const SETTINGS_STORAGE_PREFIX = 'pdf-chatbot-settings:';
+
 export function usePdfChatbotApp() {
   const [accessToken, setAccessToken] = useState(() => (AUTH_DISABLED ? '' : localStorage.getItem(ACCESS_TOKEN_KEY) || ''));
   const [user, setUser] = useState(() => (AUTH_DISABLED ? null : readStoredJson(USER_KEY)));
+  const [userSettings, setUserSettings] = useState(() => resolveStoredSettings(readStoredJson(USER_KEY)));
+  const [settingsMessage, setSettingsMessage] = useState('');
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [authMode, setAuthMode] = useState('login');
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
@@ -35,7 +47,14 @@ export function usePdfChatbotApp() {
 
   const [documents, setDocuments] = useState([]);
   const [selectedDocumentId, setSelectedDocumentId] = useState('');
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState([]);
   const [messages, setMessages] = useState(initialMessages);
+  const [suggestedQuestions, setSuggestedQuestions] = useState([]);
+  const [suggestionTitle, setSuggestionTitle] = useState('');
+  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
+  const [activeSessionId, setActiveSessionId] = useState('');
+  const [chatSessions, setChatSessions] = useState([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [query, setQuery] = useState('');
   const [search, setSearch] = useState('');
   const [isLoadingDocuments, setIsLoadingDocuments] = useState(false);
@@ -46,15 +65,24 @@ export function usePdfChatbotApp() {
   const fileInputRef = useRef(null);
   const chatEndRef = useRef(null);
 
-  const selectedDocument = documents.find((item) => item.id === selectedDocumentId) || null;
+  const selectedDocuments = selectedDocumentIds
+    .map((documentId) => documents.find((item) => item.id === documentId))
+    .filter(Boolean);
+  const readySelectedDocuments = selectedDocuments.filter((document) => document.status === 'processed');
+  const selectedDocument = documents.find((item) => item.id === selectedDocumentId) || selectedDocuments[0] || null;
   const selectedNotebook = notebooks.find((item) => item.id === selectedNotebookId) || null;
   const effectiveUser = user || (AUTH_DISABLED ? guestUser : null);
   const isAuthenticated = AUTH_DISABLED || Boolean(accessToken && user);
+  const scopeLabel = buildScopeLabel(selectedDocuments);
+  const hasReadyScope = readySelectedDocuments.length > 0;
 
   const filteredDocuments = useMemo(() => {
     const normalized = search.trim().toLowerCase();
     if (!normalized) return documents;
-    return documents.filter((item) => item.original_file_name.toLowerCase().includes(normalized));
+    return documents.filter((item) => {
+      const title = displayDocumentListTitle([item]).toLowerCase();
+      return title.includes(normalized) || item.original_file_name.toLowerCase().includes(normalized);
+    });
   }, [documents, search]);
 
   useEffect(() => {
@@ -67,6 +95,7 @@ export function usePdfChatbotApp() {
       setSelectedNotebookId('');
       setDocuments([]);
       setSelectedDocumentId('');
+      setSelectedDocumentIds([]);
       setLastAnswer(null);
       loadDocuments('');
     } else {
@@ -75,15 +104,81 @@ export function usePdfChatbotApp() {
       setSelectedNotebookId('');
       setDocuments([]);
       setSelectedDocumentId('');
+      setSelectedDocumentIds([]);
       setLastAnswer(null);
     }
   }, [accessToken]);
 
   useEffect(() => {
+    document.documentElement.classList.toggle('dark', userSettings.theme === 'dark');
+    document.documentElement.dataset.theme = userSettings.theme;
+  }, [userSettings.theme]);
+
+  useEffect(() => {
     if (accessToken || AUTH_DISABLED) {
       loadDocuments(selectedNotebookId);
+      loadChatSessions(selectedNotebookId);
     }
   }, [selectedNotebookId]);
+
+  useEffect(() => {
+    if (!accessToken && !AUTH_DISABLED) return undefined;
+    if (!readySelectedDocuments.length) {
+      setSuggestedQuestions([]);
+      setSuggestionTitle('');
+      setIsLoadingSuggestions(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setIsLoadingSuggestions(true);
+
+    authorizedFetch('/api/chatbot/suggestions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        notebook_id: selectedNotebookId || null,
+        document_ids: readySelectedDocuments.map((document) => document.id),
+        language: userSettings.language,
+      }),
+    })
+      .then((data) => {
+        if (cancelled) return;
+        setSuggestedQuestions(data.questions || []);
+        setSuggestionTitle(data.title || '');
+        if (readySelectedDocuments.length === 1 && data.title && (data.questions || []).length > 0) {
+          const [document] = readySelectedDocuments;
+          setDocuments((current) => current.map((item) => {
+            if (item.id !== document.id) return item;
+            return {
+              ...item,
+              metadata: {
+                ...(item.metadata || {}),
+                display_title: data.title,
+              },
+            };
+          }));
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSuggestedQuestions([]);
+        setSuggestionTitle('');
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingSuggestions(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    accessToken,
+    selectedNotebookId,
+    selectedDocumentId,
+    userSettings.language,
+    readySelectedDocuments.map((document) => document.id).join('|'),
+  ]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -96,6 +191,7 @@ export function usePdfChatbotApp() {
   function persistSession(token, nextUser) {
     setAccessToken(token);
     setUser(nextUser);
+    applyUserSettings(nextUser?.settings, nextUser);
     persistStoredSession(token, nextUser);
   }
 
@@ -106,9 +202,15 @@ export function usePdfChatbotApp() {
     setSelectedNotebookId('');
     setDocuments([]);
     setSelectedDocumentId('');
+    setSelectedDocumentIds([]);
     setSearch('');
     setQuery('');
     setError('');
+    setSettingsMessage('');
+    setActiveSessionId('');
+    setChatSessions([]);
+    setSuggestedQuestions([]);
+    setSuggestionTitle('');
     clearStoredSession();
     setMessages(initialMessages);
     setLastAnswer(null);
@@ -124,6 +226,7 @@ export function usePdfChatbotApp() {
     try {
       const data = await authorizedFetch('/api/auth/me');
       setUser(data);
+      applyUserSettings(data.settings, data);
       localStorage.setItem(USER_KEY, JSON.stringify(data));
     } catch (err) {
       setError(err.message);
@@ -177,14 +280,205 @@ export function usePdfChatbotApp() {
       const params = notebookId ? `?notebook_id=${encodeURIComponent(notebookId)}` : '';
       const data = await authorizedFetch(`/api/documents/${params}`);
       setDocuments(data);
+      const preferredDocumentId = data.find((item) => item.status === 'processed')?.id || data[0]?.id || '';
+      setSelectedDocumentIds((current) => {
+        const availableIds = new Set(data.map((item) => item.id));
+        const kept = current.filter((documentId) => availableIds.has(documentId));
+        return kept.length ? kept : preferredDocumentId ? [preferredDocumentId] : [];
+      });
       setSelectedDocumentId((current) => {
         if (data.some((item) => item.id === current)) return current;
-        return data.find((item) => item.status === 'processed')?.id || data[0]?.id || '';
+        return preferredDocumentId;
       });
     } catch (err) {
       setError(err.message);
     } finally {
       setIsLoadingDocuments(false);
+    }
+  }
+
+  async function loadChatSessions(notebookId = selectedNotebookId) {
+    if (!accessToken || AUTH_DISABLED) {
+      setChatSessions([]);
+      return;
+    }
+
+    setIsLoadingHistory(true);
+    setError('');
+    try {
+      const params = notebookId ? `?notebook_id=${encodeURIComponent(notebookId)}` : '';
+      const data = await authorizedFetch(`/api/chat-sessions/${params}`);
+      setChatSessions(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  }
+
+  async function loadChatSession(sessionId) {
+    if (!sessionId || !accessToken || AUTH_DISABLED) return;
+
+    setIsLoadingHistory(true);
+    setError('');
+    try {
+      const session = await authorizedFetch(`/api/chat-sessions/${sessionId}`);
+      setActiveSessionId(session.id);
+      setMessages([
+        ...initialMessages,
+        ...session.messages.map((message) => ({
+          id: message.id,
+          role: message.role,
+          content: message.content,
+          sources: message.sources || [],
+        })),
+      ]);
+
+      const sourceDocumentId = session.messages
+        .flatMap((message) => message.sources || [])
+        .find((source) => source.document_id)?.document_id;
+      const metadataDocumentId = session.messages.find((message) => message.metadata?.document_id)?.metadata?.document_id;
+      const metadataDocumentIds = session.messages.flatMap((message) => message.metadata?.document_ids || []);
+      const nextDocumentIds = uniqueIds([
+        ...session.messages.flatMap((message) => (message.sources || []).map((source) => source.document_id)),
+        ...metadataDocumentIds,
+        sourceDocumentId,
+        metadataDocumentId,
+      ]);
+      if (nextDocumentIds.length) {
+        setSelectedDocumentIds(nextDocumentIds);
+        setSelectedDocumentId(String(nextDocumentIds[0]));
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  }
+
+  function startNewChat() {
+    setActiveSessionId('');
+    setMessages(initialMessages);
+    setLastAnswer(null);
+    setQuery('');
+    setError('');
+  }
+
+  function selectDocument(documentId) {
+    setSelectedDocumentId(documentId);
+    setSelectedDocumentIds((current) => (current.includes(documentId) ? current : [...current, documentId]));
+  }
+
+  function toggleDocumentScope(documentId) {
+    setSelectedDocumentIds((current) => {
+      const next = current.includes(documentId)
+        ? current.filter((item) => item !== documentId)
+        : [...current, documentId];
+      if (!next.includes(selectedDocumentId)) {
+        setSelectedDocumentId(next[0] || documentId);
+      } else {
+        setSelectedDocumentId(documentId);
+      }
+      return next;
+    });
+  }
+
+  function submitSuggestedQuestion(question) {
+    setQuery(question);
+    return askQuestion(null, question);
+  }
+
+  function applyUserSettings(rawSettings, owner = effectiveUser) {
+    const nextSettings = resolveStoredSettings(owner, rawSettings);
+    setUserSettings(nextSettings);
+    localStorage.setItem(settingsStorageKey(owner), JSON.stringify(nextSettings));
+  }
+
+  async function updateUserSettings(partialSettings) {
+    const nextSettings = normalizeUserSettings({ ...userSettings, ...partialSettings });
+    const previousSettings = userSettings;
+    setUserSettings(nextSettings);
+    localStorage.setItem(settingsStorageKey(effectiveUser), JSON.stringify(nextSettings));
+    setSettingsMessage('');
+
+    if (AUTH_DISABLED) {
+      setSettingsMessage(nextSettings.language === 'vi' ? 'Đã lưu cài đặt.' : 'Settings saved.');
+      return;
+    }
+
+    setIsSavingSettings(true);
+    setError('');
+    try {
+      const savedSettings = nextSettings;
+      applyUserSettings(savedSettings, effectiveUser);
+      setUser((current) => {
+        if (!current) return current;
+        const nextUser = { ...current, settings: normalizeUserSettings(savedSettings) };
+        localStorage.setItem(USER_KEY, JSON.stringify(nextUser));
+        return nextUser;
+      });
+      setSettingsMessage(savedSettings.language === 'vi' ? 'Đã lưu cài đặt.' : 'Settings saved.');
+    } catch (err) {
+      setUserSettings(previousSettings);
+      localStorage.setItem(settingsStorageKey(effectiveUser), JSON.stringify(previousSettings));
+      setError(err.message);
+    } finally {
+      setIsSavingSettings(false);
+    }
+  }
+
+  async function updateLocalUserSettings(partialSettings) {
+    const nextSettings = normalizeUserSettings({ ...userSettings, ...partialSettings });
+    setIsSavingSettings(true);
+    setError('');
+    setSettingsMessage('');
+    setUserSettings(nextSettings);
+    localStorage.setItem(settingsStorageKey(effectiveUser), JSON.stringify(nextSettings));
+    setUser((current) => {
+      if (!current) return current;
+      const nextUser = { ...current, settings: nextSettings };
+      localStorage.setItem(USER_KEY, JSON.stringify(nextUser));
+      return nextUser;
+    });
+    setSettingsMessage(nextSettings.language === 'vi' ? 'Đã lưu cài đặt.' : 'Settings saved.');
+    setIsSavingSettings(false);
+  }
+
+  async function changePassword(payload) {
+    if (AUTH_DISABLED) return;
+    setIsChangingPassword(true);
+    setSettingsMessage('');
+    setError('');
+    try {
+      const data = await authorizedFetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      setSettingsMessage(data.message || 'Password changed.');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsChangingPassword(false);
+    }
+  }
+
+  async function deleteAccount(payload) {
+    if (AUTH_DISABLED) return;
+    setIsDeletingAccount(true);
+    setSettingsMessage('');
+    setError('');
+    try {
+      await authorizedFetch('/api/auth/account', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      logout();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsDeletingAccount(false);
     }
   }
 
@@ -301,37 +595,34 @@ export function usePdfChatbotApp() {
     }
   }
 
-  async function uploadPdf(file) {
-    if (!file) return;
-    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+  async function uploadPdf(files) {
+    const fileList = Array.isArray(files) ? files : [files].filter(Boolean);
+    if (!fileList.length) return;
+
+    const invalidFile = fileList.find((file) => file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf'));
+    if (invalidFile) {
       setError('Only PDF files are supported.');
       return;
-    }
-
-    const formData = new FormData();
-    formData.append('file', file);
-    if (selectedNotebookId) {
-      formData.append('notebook_id', selectedNotebookId);
     }
 
     setIsUploading(true);
     setError('');
     try {
-      const uploaded = await authorizedFetch('/api/documents/upload', {
-        method: 'POST',
-        body: formData,
-      });
-      setDocuments((current) => [uploaded, ...current.filter((item) => item.id !== uploaded.id)]);
-      setSelectedDocumentId(uploaded.id);
-      setMessages((current) => [
-        ...current,
-        {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: `Uploaded and processed "${uploaded.original_file_name}". You can ask questions about this document now.`,
-          sources: [],
-        },
-      ]);
+      for (const file of fileList) {
+        const formData = new FormData();
+        formData.append('file', file);
+        if (selectedNotebookId) {
+          formData.append('notebook_id', selectedNotebookId);
+        }
+
+        const uploaded = await authorizedFetch('/api/documents/upload', {
+          method: 'POST',
+          body: formData,
+        });
+        setDocuments((current) => [uploaded, ...current.filter((item) => item.id !== uploaded.id)]);
+        setSelectedDocumentId(uploaded.id);
+        setSelectedDocumentIds((current) => uniqueIds([uploaded.id, ...current]));
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -340,10 +631,16 @@ export function usePdfChatbotApp() {
     }
   }
 
-  async function askQuestion(event) {
-    event.preventDefault();
-    const trimmed = query.trim();
+  async function askQuestion(event, suggestedQuestion = '') {
+    event?.preventDefault?.();
+    const trimmed = (suggestedQuestion || query).trim();
     if (!trimmed || isAsking) return;
+
+    const scopedDocuments = selectedDocuments.filter((document) => document.status === 'processed');
+    if (!scopedDocuments.length) {
+      setError(userSettings.language === 'vi' ? 'Vui lòng chọn ít nhất 1 PDF đã xử lý trước khi hỏi.' : 'Select at least one processed PDF before asking.');
+      return;
+    }
 
     setMessages((current) => [
       ...current,
@@ -365,13 +662,19 @@ export function usePdfChatbotApp() {
         body: JSON.stringify({
           query: trimmed,
           notebook_id: selectedNotebookId || null,
-          document_id: selectedDocument?.status === 'processed' ? selectedDocument.id : null,
+          document_id: scopedDocuments.length === 1 ? scopedDocuments[0].id : null,
+          document_ids: scopedDocuments.map((document) => document.id),
+          session_id: activeSessionId || null,
           top_k: 5,
           save_history: true,
         }),
       });
 
       setLastAnswer(answer);
+      if (answer.session_id) {
+        setActiveSessionId(answer.session_id);
+        loadChatSessions(selectedNotebookId);
+      }
       setMessages((current) => [
         ...current,
         {
@@ -431,6 +734,7 @@ export function usePdfChatbotApp() {
     header: {
       user: effectiveUser,
       isAuthDisabled: AUTH_DISABLED,
+      language: userSettings.language,
       onLogout: logout,
     },
     notebooks: {
@@ -438,6 +742,7 @@ export function usePdfChatbotApp() {
       selectedNotebookId,
       newNotebookTitle,
       isNotebookLoading,
+      language: userSettings.language,
       onReload: loadNotebooks,
       onSelectNotebook: setSelectedNotebookId,
       onNewNotebookTitleChange: setNewNotebookTitle,
@@ -447,25 +752,51 @@ export function usePdfChatbotApp() {
       documents,
       filteredDocuments,
       selectedDocumentId,
+      selectedDocumentIds,
+      selectedDocuments,
       selectedNotebook,
       search,
       isLoadingDocuments,
       isUploading,
+      language: userSettings.language,
       fileInputRef,
       onReload: () => loadDocuments(),
       onUpload: uploadPdf,
       onSearchChange: setSearch,
-      onSelectDocument: setSelectedDocumentId,
+      onSelectDocument: selectDocument,
+      onToggleDocumentScope: toggleDocumentScope,
     },
     chat: {
       selectedDocument,
+      selectedDocuments,
+      readySelectedDocuments,
+      scopeLabel,
+      suggestionTitle,
+      suggestedQuestions,
+      isLoadingSuggestions,
+      hasReadyScope,
+      language: userSettings.language,
       error,
       messages,
+      activeSessionId,
       isAsking,
       query,
       chatEndRef,
       onSubmit: askQuestion,
       onQueryChange: setQuery,
+      onSuggestionSelect: submitSuggestedQuestion,
+      onSelectSession: loadChatSession,
+      onNewChat: startNewChat,
+    },
+    history: {
+      sessions: chatSessions,
+      activeSessionId,
+      isLoading: isLoadingHistory,
+      language: userSettings.language,
+      messages,
+      onReload: () => loadChatSessions(),
+      onSelectSession: loadChatSession,
+      onNewChat: startNewChat,
     },
     status: {
       user: effectiveUser,
@@ -473,5 +804,49 @@ export function usePdfChatbotApp() {
       selectedDocument,
       lastAnswer,
     },
+    settings: {
+      user: effectiveUser,
+      values: userSettings,
+      message: settingsMessage,
+      error,
+      isAuthDisabled: AUTH_DISABLED,
+      isSaving: isSavingSettings,
+      isChangingPassword,
+      isDeletingAccount,
+      onLogout: logout,
+      onUpdate: updateLocalUserSettings,
+      onChangePassword: changePassword,
+      onDeleteAccount: deleteAccount,
+    },
   };
+}
+
+function normalizeUserSettings(settings) {
+  const rawSettings = settings || {};
+  return {
+    language: rawSettings.language === 'vi' ? 'vi' : 'en',
+    theme: rawSettings.theme === 'dark' ? 'dark' : 'light',
+  };
+}
+
+function resolveStoredSettings(owner, fallbackSettings = null) {
+  const storedSettings = readStoredJson(settingsStorageKey(owner));
+  return normalizeUserSettings(storedSettings || fallbackSettings || owner?.settings || defaultUserSettings);
+}
+
+function settingsStorageKey(user) {
+  return `${SETTINGS_STORAGE_PREFIX}${user?.email || 'guest'}`;
+}
+
+function uniqueIds(values) {
+  return values.reduce((ids, value) => {
+    if (!value) return ids;
+    const normalized = String(value);
+    if (!ids.includes(normalized)) ids.push(normalized);
+    return ids;
+  }, []);
+}
+
+function buildScopeLabel(selectedDocuments) {
+  return displayDocumentListTitle(selectedDocuments);
 }

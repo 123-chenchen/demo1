@@ -16,8 +16,6 @@ import {
   UserPlus,
 } from 'lucide-react';
 
-import { API_ENDPOINT_LABEL } from '../api.js';
-
 const authCopy = {
   login: {
     title: 'Sign In',
@@ -113,9 +111,9 @@ export function AuthScreen({
                 </p>
               </div>
               <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
-                <p className="text-sm font-semibold text-zinc-900">Service</p>
+                <p className="text-sm font-semibold text-zinc-900">Workspace</p>
                 <p className="mt-1 text-sm leading-6 text-zinc-600">
-                  Backend points to <span className="font-medium text-zinc-900">{API_ENDPOINT_LABEL}</span>.
+                  Keep your sources, conversations, and settings together across sessions.
                 </p>
               </div>
             </div>

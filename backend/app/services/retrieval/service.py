@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from time import perf_counter
+from collections.abc import Sequence
 from uuid import UUID
 
 from app.config import get_settings
@@ -28,6 +29,7 @@ class RetrievalService:
         query: str,
         top_k: int | None = None,
         document_id: UUID | None = None,
+        document_ids: Sequence[UUID] | None = None,
         notebook_id: UUID | None = None,
         public_only: bool = False,
     ) -> RetrievalTrace:
@@ -40,6 +42,7 @@ class RetrievalService:
             query=query,
             limit=final_top_k,
             document_id=document_id,
+            document_ids=document_ids,
             notebook_id=notebook_id,
             public_only=public_only,
         )
@@ -83,6 +86,12 @@ class RetrievalService:
                             **metadata,
                             "retrieval_rank": rank,
                         },
+                        document_name=str(metadata.get("document_name") or metadata.get("original_file_name") or ""),
+                        page_number=_optional_int(metadata.get("page_number") or metadata.get("page_from")),
+                        quoted_text=str(metadata.get("quoted_text") or getattr(document, "page_content", "") or ""),
+                        bbox=_optional_float_list(metadata.get("bbox")),
+                        page_width=_optional_float(metadata.get("page_width")),
+                        page_height=_optional_float(metadata.get("page_height")),
                     )
                 )
             except (TypeError, ValueError):
@@ -95,6 +104,18 @@ def _optional_int(value: object) -> int | None:
     if value is None:
         return None
     return int(value)
+
+
+def _optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    return float(value)
+
+
+def _optional_float_list(value: object) -> list[float] | None:
+    if not isinstance(value, list) or len(value) != 4:
+        return None
+    return [float(item) for item in value]
 
 
 retrieval_service = RetrievalService()

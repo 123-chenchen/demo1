@@ -28,12 +28,7 @@ backend/
 |   |-- utils/                # shared PDF helpers
 |   |-- __init__.py
 |   `-- main.py
-|-- migrations/
-|   |-- versions/
-|   |-- env.py
-|   `-- script.py.mako
 |-- tests/
-|-- alembic.ini
 |-- Dockerfile
 |-- main.py
 |-- pyproject.toml
@@ -81,15 +76,12 @@ cp .env.example .env
 docker compose up -d postgres minio qdrant
 cd backend
 uv sync
-uv run alembic upgrade head
-uv run pdf-chatbot
+AUTO_INIT_DB=true uv run pdf-chatbot
 ```
 
 Useful commands:
 
 ```bash
-uv run alembic current
-uv run alembic revision --autogenerate -m "add new table"
 uv run python main.py
 uv run uvicorn app.main:app --reload
 uv run pytest -m "not integration"
@@ -103,7 +95,7 @@ When run through Docker Compose, the backend service:
 
 - waits for Postgres to become healthy
 - waits for MinIO, Qdrant, and Ollama to start
-- runs `alembic upgrade head`
+- runs idempotent schema bootstrap when Compose maps `BACKEND_AUTO_INIT_DB=true` to backend `AUTO_INIT_DB=true`
 - serves FastAPI on port `8000`
 
 Inside Docker Compose, the backend talks to:
@@ -191,17 +183,18 @@ The public API and run commands stay the same after the refactor.
 ```env
 API_HOST=0.0.0.0
 API_PORT=8000
-POSTGRES_HOST=localhost
+BACKEND_AUTO_INIT_DB=true
+POSTGRES_HOST=postgres
 POSTGRES_PORT=5432
 POSTGRES_DB=pdf_chatbot
 POSTGRES_USER=postgres
-POSTGRES_PASSWORD=postgres
-DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/pdf_chatbot
-QDRANT_URL=http://localhost:6333
+POSTGRES_PASSWORD=change-this-postgres-password
+DATABASE_URL=postgresql+psycopg://postgres:change-this-postgres-password@postgres:5432/pdf_chatbot
+QDRANT_URL=http://qdrant:6333
 QDRANT_COLLECTION_NAME=document_chunks
-MINIO_ENDPOINT=localhost:9000
-MINIO_ACCESS_KEY=minioadmin
-MINIO_SECRET_KEY=minioadmin
+MINIO_ENDPOINT=minio:9000
+MINIO_ACCESS_KEY=change-this-minio-user
+MINIO_SECRET_KEY=change-this-minio-password
 MINIO_BUCKET=pdf-documents
 MINIO_SECURE=false
 DOCUMENT_CHUNK_SIZE=1000
@@ -211,11 +204,11 @@ EMBEDDING_BATCH_SIZE=32
 RETRIEVAL_TOP_K=5
 CHAT_PROVIDER=ollama
 CHAT_TEMPERATURE=0.1
-OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_BASE_URL=http://ollama:11434
 OLLAMA_MODEL_NAME=qwen2.5:7b-instruct
 GOOGLE_MODEL_NAME=
 GOOGLE_API_KEY=
-JWT_SECRET_KEY=change-me
+JWT_SECRET_KEY=change-this-jwt-secret
 JWT_ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=30
 REFRESH_TOKEN_EXPIRE_DAYS=7

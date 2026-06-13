@@ -19,6 +19,12 @@ class ChunkCandidate:
     score: float | None
     source: str = ""
     metadata: dict[str, object] = field(default_factory=dict)
+    document_name: str | None = None
+    page_number: int | None = None
+    quoted_text: str | None = None
+    bbox: list[float] | None = None
+    page_width: float | None = None
+    page_height: float | None = None
 
 
 @dataclass(slots=True)
@@ -47,4 +53,10 @@ def chunk_candidate_to_dict(candidate: ChunkCandidate) -> dict[str, object]:
         "score": candidate.score,
         "source": candidate.source,
         "metadata": candidate.metadata,
+        "document_name": candidate.document_name,
+        "page_number": candidate.page_number,
+        "quoted_text": candidate.quoted_text,
+        "bbox": candidate.bbox,
+        "page_width": candidate.page_width,
+        "page_height": candidate.page_height,
     }

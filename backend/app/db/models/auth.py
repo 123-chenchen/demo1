@@ -24,6 +24,8 @@ class User(TimestampMixin, Base):
         server_default=text("gen_random_uuid()"),
     )
     email: Mapped[str] = mapped_column(String(255), nullable=False)
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_verified: Mapped[bool] = mapped_column(
         Boolean,
@@ -60,16 +62,6 @@ class User(TimestampMixin, Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
-
-    @property
-    def name(self) -> str:
-        local_part = (self.email or "").split("@", 1)[0].strip()
-        alias_free_local_part = local_part.split("+", 1)[0].strip() or local_part
-        tokens = [token for token in alias_free_local_part.replace("-", ".").replace("_", ".").split(".") if token]
-        if not tokens:
-            return self.email
-        return " ".join(token if token.isdigit() else token[:1].upper() + token[1:].lower() for token in tokens)
-
 
 class PendingRegistration(TimestampMixin, Base):
     __tablename__ = "pending_registrations"

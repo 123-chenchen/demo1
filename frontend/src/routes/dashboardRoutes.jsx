@@ -1,12 +1,11 @@
 import React from 'react';
+import { Navigate } from 'react-router-dom';
 
-import { AnalyticsPage } from '../pages/dashboard/AnalyticsPage.jsx';
 import { ChatPage } from '../pages/dashboard/ChatPage.jsx';
 import { DashboardPage } from '../pages/dashboard/DashboardPage.jsx';
 import { DocumentDetailPage } from '../pages/dashboard/DocumentDetailPage.jsx';
 import { DocumentsPage } from '../pages/dashboard/DocumentsPage.jsx';
 import { HistoryPage } from '../pages/dashboard/HistoryPage.jsx';
-import { ProfilePage } from '../pages/dashboard/ProfilePage.jsx';
 import { SettingsPage } from '../pages/dashboard/SettingsPage.jsx';
 
 export const dashboardRoutes = [
@@ -35,15 +34,15 @@ export const dashboardRoutes = [
     element: <HistoryPage />,
   },
   {
-    path: 'analytics',
-    element: <AnalyticsPage />,
-  },
-  {
     path: 'settings',
     element: <SettingsPage />,
   },
   {
+    path: 'analytics',
+    element: <Navigate to="/dashboard" replace />,
+  },
+  {
     path: 'profile',
-    element: <ProfilePage />,
+    element: <Navigate to="/settings" replace />,
   },
 ];

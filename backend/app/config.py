@@ -10,17 +10,19 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     api_reload: bool = False
-    postgres_host: str = "localhost"
+    auto_init_db: bool = False
+    cors_allowed_origins: str = ""
+    postgres_host: str = "postgres"
     postgres_port: int = 5432
     postgres_db: str = "pdf_chatbot"
     postgres_user: str = "postgres"
-    postgres_password: str = "postgres"
+    postgres_password: str = ""
     database_url: str | None = None
-    qdrant_url: str = "http://localhost:6333"
+    qdrant_url: str = ""
     qdrant_collection_name: str = "document_chunks"
-    minio_endpoint: str = "localhost:9000"
-    minio_access_key: str = "minioadmin"
-    minio_secret_key: str = "minioadmin"
+    minio_endpoint: str = ""
+    minio_access_key: str = ""
+    minio_secret_key: str = ""
     minio_bucket: str = "pdf-documents"
     minio_secure: bool = False
     document_chunk_size: int = 1000
@@ -30,11 +32,11 @@ class Settings(BaseSettings):
     retrieval_top_k: int = 5
     chat_provider: str = "ollama"
     chat_temperature: float = 0.1
-    ollama_base_url: str = "http://localhost:11434"
+    ollama_base_url: str = ""
     ollama_model_name: str | None = "llama3"
     google_api_key: str | None = None
     google_model_name: str | None = None
-    jwt_secret_key: str = "change-me"
+    jwt_secret_key: str = ""
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
@@ -62,6 +64,10 @@ class Settings(BaseSettings):
             f"{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
+
+    @property
+    def cors_origins(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
 
 
 @lru_cache

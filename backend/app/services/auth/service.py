@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import secrets
 import smtplib
+from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from uuid import UUID
@@ -15,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.crud import hash_password, hash_token, verify_password
-from app.db.models import EmailOTP, Notebook, PendingRegistration, RefreshToken, User
+from app.db.models import ChatSession, Document, EmailOTP, Notebook, PendingRegistration, RefreshToken, User
 
 REGISTER_OTP_PURPOSE = "register"
 RESET_PASSWORD_OTP_PURPOSE = "reset_password"
@@ -91,11 +92,76 @@ def _build_auth_user_payload(user: User) -> dict[str, object]:
     return {
         "id": user.id,
         "email": user.email,
-        "name": _build_name_from_email(user.email),
+        "name": _resolve_user_display_name(user),
+        "settings": _settings_from_metadata(user.extra_metadata),
         "is_verified": user.is_verified,
         "created_at": user.created_at,
         "updated_at": user.updated_at,
     }
+
+
+def _clean_display_name(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = " ".join(value.split())
+    return cleaned or None
+
+
+def _profile_display_name(profile: object) -> str | None:
+    if not isinstance(profile, dict):
+        return None
+
+    for key in ("name", "full_name", "display_name"):
+        resolved = _clean_display_name(profile.get(key))
+        if resolved:
+            return resolved
+
+    joined_name = _clean_display_name(" ".join(
+        part for part in (
+            _clean_display_name(profile.get("given_name")),
+            _clean_display_name(profile.get("family_name")),
+        )
+        if part
+    ))
+    return joined_name
+
+
+def _metadata_dict(metadata: object) -> dict:
+    if isinstance(metadata, Mapping):
+        return dict(metadata)
+    return {}
+
+
+def _metadata_display_name(metadata: object) -> str | None:
+    data = _metadata_dict(metadata)
+
+    for key in ("name", "full_name", "display_name"):
+        resolved = _clean_display_name(data.get(key))
+        if resolved:
+            return resolved
+
+    for key in ("google_profile", "googleProfile", "google", "profile", "oauth_profile", "oauthProfile"):
+        resolved = _profile_display_name(data.get(key))
+        if resolved:
+            return resolved
+
+    return None
+
+
+def _resolve_user_display_name(user: object) -> str:
+    for key in ("name", "full_name"):
+        resolved = _clean_display_name(getattr(user, key, None))
+        if resolved:
+            return resolved
+
+    metadata = getattr(user, "extra_metadata", None)
+    if metadata is None:
+        metadata = getattr(user, "metadata", None)
+    resolved = _metadata_display_name(metadata)
+    if resolved:
+        return resolved
+
+    return _build_name_from_email(str(getattr(user, "email", "") or ""))
 
 
 def _build_name_from_email(email: str) -> str:
@@ -119,6 +185,19 @@ def _build_default_notebook_title(email: str) -> str:
     if not display_name or display_name == email:
         return "My Notebook"
     return f"{display_name}'s notebook"
+
+
+def _settings_from_metadata(metadata: object) -> dict[str, str]:
+    raw_settings = _metadata_dict(metadata).get("settings") or {}
+    if not isinstance(raw_settings, Mapping):
+        raw_settings = {}
+    raw_settings = dict(raw_settings)
+    language = raw_settings.get("language")
+    theme = raw_settings.get("theme")
+    return {
+        "language": language if language in {"en", "vi"} else "en",
+        "theme": theme if theme in {"light", "dark"} else "light",
+    }
 
 
 def _build_otp_email_message(*, email: str, otp_code: str, purpose: str, expires_at: datetime) -> EmailMessage:
@@ -186,6 +265,9 @@ class AuthService:
 
     def build_name_from_email(self, email: str) -> str:
         return _build_name_from_email(email)
+
+    def resolve_user_display_name(self, user: object) -> str:
+        return _resolve_user_display_name(user)
 
     def request_register(self, db: Session, *, email: str, password: str) -> dict[str, object]:
         normalized_email = _validate_email_format(email)
@@ -459,6 +541,115 @@ class AuthService:
         return {
             "message": "Password has been reset successfully.",
         }
+
+    def get_user_settings(self, user: User) -> dict[str, str]:
+        return _settings_from_metadata(getattr(user, "extra_metadata", None))
+
+    def update_user_settings(
+        self,
+        db: Session,
+        *,
+        user: User,
+        language: str | None = None,
+        theme: str | None = None,
+    ) -> dict[str, str]:
+        next_settings = self.get_user_settings(user)
+        if language is not None:
+            next_settings["language"] = language
+        if theme is not None:
+            next_settings["theme"] = theme
+
+        metadata = dict(user.extra_metadata or {})
+        metadata["settings"] = next_settings
+        user.extra_metadata = metadata
+        db.add(user)
+
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            raise AuthConflictError("Could not update user settings.") from exc
+
+        db.refresh(user)
+        return self.get_user_settings(user)
+
+    def change_password(
+        self,
+        db: Session,
+        *,
+        user: User,
+        current_password: str,
+        new_password: str,
+    ) -> dict[str, str]:
+        if not verify_password(current_password, user.password_hash):
+            raise AuthAuthenticationError("Current password is incorrect.")
+        _validate_password_strength(new_password)
+
+        user.password_hash = hash_password(new_password)
+        db.add(user)
+        db.execute(
+            update(RefreshToken)
+            .where(
+                RefreshToken.user_id == user.id,
+                RefreshToken.revoked_at.is_(None),
+            )
+            .values(revoked_at=_now_utc())
+        )
+
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            raise AuthConflictError("Could not change the password.") from exc
+
+        return {"message": "Password has been changed successfully."}
+
+    def delete_account(
+        self,
+        db: Session,
+        *,
+        user: User,
+        current_password: str,
+    ) -> dict[str, str]:
+        if not verify_password(current_password, user.password_hash):
+            raise AuthAuthenticationError("Current password is incorrect.")
+
+        try:
+            self._delete_user_owned_data(db, user=user)
+            db.delete(user)
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            raise AuthConflictError("Could not delete the account.") from exc
+
+        return {"message": "Account has been deleted successfully."}
+
+    def _delete_user_owned_data(self, db: Session, *, user: User) -> None:
+        notebook_ids = list(db.scalars(select(Notebook.id).where(Notebook.user_id == user.id)).all())
+        if not notebook_ids:
+            return
+
+        chat_sessions = list(
+            db.scalars(
+                select(ChatSession).where(ChatSession.notebook_id.in_(notebook_ids))
+            ).all()
+        )
+        for session in chat_sessions:
+            db.delete(session)
+        db.flush()
+
+        documents = list(
+            db.scalars(
+                select(Document).where(Document.notebook_id.in_(notebook_ids))
+            ).all()
+        )
+        for document in documents:
+            db.delete(document)
+        db.flush()
+
+        notebooks = list(db.scalars(select(Notebook).where(Notebook.id.in_(notebook_ids))).all())
+        for notebook in notebooks:
+            db.delete(notebook)
 
     def _get_user_by_email(self, db: Session, email: str) -> User | None:
         return db.scalar(select(User).where(User.email == email))

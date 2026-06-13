@@ -8,14 +8,13 @@ ENV PATH="/app/.venv/bin:${PATH}"
 
 WORKDIR /app
 
-COPY --from=ghcr.io/astral-sh/uv:0.8.22 /uv /uvx /bin/
+RUN pip install --no-cache-dir uv==0.8.22
 
-COPY pyproject.toml uv.lock README.md alembic.ini main.py ./
+COPY pyproject.toml uv.lock README.md main.py ./
 COPY app ./app
-COPY migrations ./migrations
 
-RUN uv sync --frozen
+RUN uv sync --frozen --no-dev --no-install-project
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
