@@ -57,7 +57,7 @@ export function AppHeader({ isAuthDisabled, language = 'en' }) {
 }
 
 const enText = {
-  tagline: 'Upload PDFs and ask questions based on extracted content',
+  
   signInDisabled: 'Sign-in disabled',
   nav: {
     dashboard: 'Chat',
@@ -68,7 +68,7 @@ const enText = {
 };
 
 const viText = {
-  tagline: 'Tải PDF lên và hỏi đáp dựa trên nội dung đã trích xuất',
+  
   signInDisabled: 'Đăng nhập đang tắt',
   nav: {
     dashboard: 'Chat',
