@@ -63,7 +63,7 @@ export function DocumentDetailPage() {
               </div>
               <dl className="grid gap-2 text-sm sm:grid-cols-3">
                 <DetailRow label="Pages" value={document.total_pages || 0} />
-                <DetailRow label="Chunks" value={document.total_chunks || 0} />
+                <DetailRow label="Text sections" value={document.total_chunks || 0} />
                 <DetailRow label="Size" value={formatBytes(document.file_size_bytes)} />
               </dl>
             </div>

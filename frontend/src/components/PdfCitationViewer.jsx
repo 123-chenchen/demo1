@@ -4,39 +4,108 @@ import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
 import { ACCESS_TOKEN_KEY, apiFetchBlob } from '../api.js';
-import { displayDocumentTitle } from '../documentTitles.js';
+import { displayDocumentTitle, displayOriginalFileName } from '../documentTitles.js';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 const pdfDocumentCache = new Map();
 const objectUrlCache = new Map();
 
-export function PdfCitationViewer({ document, activeCitation }) {
+export function PdfCitationViewer({ document, documents = [], activeCitation }) {
   const containerRef = useRef(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const [zoom, setZoom] = useState(1);
+  const viewerDocuments = useMemo(() => uniqueDocuments(documents.length ? documents : document ? [document] : []), [documents, document]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return undefined;
+
+    const updateWidth = () => setContainerWidth(container.clientWidth);
+    updateWidth();
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    setZoom(1);
+  }, [viewerDocuments.map((item) => item.id).join('|')]);
+
+  const headerTitle = viewerDocuments.length > 1
+    ? `${viewerDocuments.length} PDFs selected`
+    : viewerDocuments[0]
+      ? displayDocumentTitle(viewerDocuments[0])
+      : 'PDF viewer';
+
+  return (
+    <section className="flex h-full min-h-0 flex-col rounded-lg border border-zinc-200 bg-white shadow-sm">
+      <div className="flex flex-col justify-between gap-3 border-b border-zinc-200 px-4 py-3 sm:flex-row sm:items-center">
+        <div className="min-w-0">
+          <h3 className="truncate text-base font-bold text-zinc-950">{headerTitle}</h3>
+          <p className="text-sm text-zinc-500">
+            {viewerDocuments.length ? 'Previewing selected files.' : activeCitation ? 'Opening citation...' : 'Select a PDF source to preview it.'}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <IconButton label="Fit width" onClick={() => setZoom(1)}>
+            <Maximize2 size={16} />
+          </IconButton>
+          <IconButton label="Zoom out" onClick={() => setZoom((current) => Math.max(0.65, Number((current - 0.15).toFixed(2))))}>
+            <ZoomOut size={16} />
+          </IconButton>
+          <span className="w-12 text-center text-xs font-semibold text-zinc-600">{Math.round(zoom * 100)}%</span>
+          <IconButton label="Zoom in" onClick={() => setZoom((current) => Math.min(2.25, Number((current + 0.15).toFixed(2))))}>
+            <ZoomIn size={16} />
+          </IconButton>
+        </div>
+      </div>
+
+      <div ref={containerRef} data-pdf-scroll-container className="relative min-h-0 flex-1 overflow-auto bg-zinc-100 p-4">
+        {!viewerDocuments.length && (
+          <div className="flex h-full min-h-[360px] items-center justify-center text-center">
+            <div className="max-w-xs">
+              <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-lg bg-white text-zinc-700 shadow-sm">
+                <FileText size={22} />
+              </div>
+              <h3 className="mt-4 text-base font-bold text-zinc-950">Studio preview</h3>
+              <p className="mt-2 text-sm leading-6 text-zinc-500">
+                Select a source from the left panel. Citations will open and scroll to the relevant passage here.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {viewerDocuments.map((item) => (
+          <PdfDocumentPreview
+            key={item.id}
+            document={item}
+            activeCitation={activeCitation}
+            containerRef={containerRef}
+            containerWidth={containerWidth}
+            zoom={zoom}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function PdfDocumentPreview({ document, activeCitation, containerRef, containerWidth, zoom }) {
+  const sectionRef = useRef(null);
   const [pdfDocument, setPdfDocument] = useState(null);
   const [pageCount, setPageCount] = useState(0);
   const [pageSizes, setPageSizes] = useState({});
   const [currentPage, setCurrentPage] = useState(1);
-  const [containerWidth, setContainerWidth] = useState(0);
-  const [zoom, setZoom] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!document?.id) {
-      setPdfDocument(null);
-      setPageCount(0);
-      setPageSizes({});
-      setCurrentPage(1);
-      return;
-    }
-
     let cancelled = false;
     setIsLoading(true);
     setError('');
     setPageSizes({});
     setCurrentPage(1);
-    setZoom(1);
 
     loadPdfDocument(document.id)
       .then((loadedPdf) => {
@@ -52,37 +121,27 @@ export function PdfCitationViewer({ document, activeCitation }) {
         }
       })
       .finally(() => {
-        if (!cancelled) {
-          setIsLoading(false);
-        }
+        if (!cancelled) setIsLoading(false);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [document?.id]);
+  }, [document.id]);
 
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) return undefined;
-
-    const updateWidth = () => setContainerWidth(container.clientWidth);
-    updateWidth();
-    const observer = new ResizeObserver(updateWidth);
-    observer.observe(container);
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return undefined;
+    const section = sectionRef.current;
+    if (!container || !section) return undefined;
 
     const updateCurrentPage = () => {
-      const pages = Array.from(container.querySelectorAll('[data-page-number]'));
+      const pages = Array.from(section.querySelectorAll('[data-page-number]'));
+      const containerTop = container.getBoundingClientRect().top;
       const marker = container.scrollTop + Math.max(120, container.clientHeight * 0.2);
       const activePage = pages.reduce((current, page) => {
         const pageNumber = Number(page.getAttribute('data-page-number') || current);
-        return page.offsetTop <= marker ? pageNumber : current;
+        const pageTop = container.scrollTop + page.getBoundingClientRect().top - containerTop;
+        return pageTop <= marker ? pageNumber : current;
       }, 1);
       setCurrentPage(activePage);
     };
@@ -90,11 +149,12 @@ export function PdfCitationViewer({ document, activeCitation }) {
     updateCurrentPage();
     container.addEventListener('scroll', updateCurrentPage, { passive: true });
     return () => container.removeEventListener('scroll', updateCurrentPage);
-  }, [pageCount]);
+  }, [containerRef, pageCount]);
 
   useEffect(() => {
-    requestAnimationFrame(() => scrollToActiveCitation(containerRef.current, activeCitation, pageSizes));
-  }, [activeCitation, pageSizes]);
+    if (activeCitation?.document_id && String(activeCitation.document_id) !== String(document.id)) return;
+    requestAnimationFrame(() => scrollToActiveCitation(containerRef.current, sectionRef.current, activeCitation, pageSizes));
+  }, [activeCitation, containerRef, document.id, pageSizes]);
 
   const registerPageSize = useCallback((pageNumber, nextSize) => {
     setPageSizes((current) => {
@@ -113,73 +173,39 @@ export function PdfCitationViewer({ document, activeCitation }) {
   const pageNumbers = useMemo(() => Array.from({ length: pageCount }, (_, index) => index + 1), [pageCount]);
 
   return (
-    <section className="flex h-full min-h-0 flex-col rounded-lg border border-zinc-200 bg-white shadow-sm">
-      <div className="flex flex-col justify-between gap-3 border-b border-zinc-200 px-4 py-3 sm:flex-row sm:items-center">
-        <div className="min-w-0">
-          <h3 className="truncate text-base font-bold text-zinc-950">{document ? displayDocumentTitle(document) : 'PDF viewer'}</h3>
-          <p className="text-sm text-zinc-500">
-            {pageCount ? `Page ${currentPage}/${pageCount}` : activeCitation ? 'Opening citation...' : 'Select a PDF source to preview it.'}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <IconButton label="Fit width" onClick={() => setZoom(1)}>
-            <Maximize2 size={16} />
-          </IconButton>
-          <IconButton label="Zoom out" onClick={() => setZoom((current) => Math.max(0.65, Number((current - 0.15).toFixed(2))))}>
-            <ZoomOut size={16} />
-          </IconButton>
-          <span className="w-12 text-center text-xs font-semibold text-zinc-600">{Math.round(zoom * 100)}%</span>
-          <IconButton label="Zoom in" onClick={() => setZoom((current) => Math.min(2.25, Number((current + 0.15).toFixed(2))))}>
-            <ZoomIn size={16} />
-          </IconButton>
-        </div>
+    <article ref={sectionRef} className="mb-5 rounded-lg border border-zinc-200 bg-white shadow-sm last:mb-0">
+      <div className="border-b border-zinc-200 px-3 py-2">
+        <h4 className="truncate text-sm font-bold text-zinc-950">{displayDocumentTitle(document)}</h4>
+        <p className="truncate text-xs text-zinc-500">
+          {displayOriginalFileName(document)}{pageCount ? ` / Page ${currentPage}/${pageCount}` : ''}
+        </p>
       </div>
 
-      <div ref={containerRef} className="relative min-h-0 flex-1 overflow-auto bg-zinc-100 p-4">
+      <div className="relative p-3">
         {error && (
-          <div className="flex gap-2 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
+          <div className="mb-3 flex gap-2 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
             <FileText className="mt-0.5 shrink-0" size={18} />
             <span>{error}</span>
           </div>
         )}
-
-        {!document && (
-          <div className="flex h-full min-h-[360px] items-center justify-center text-center">
-            <div className="max-w-xs">
-              <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-lg bg-white text-zinc-700 shadow-sm">
-                <FileText size={22} />
-              </div>
-              <h3 className="mt-4 text-base font-bold text-zinc-950">Studio preview</h3>
-              <p className="mt-2 text-sm leading-6 text-zinc-500">
-                Select a source from the left panel. Citations will open and scroll to the relevant passage here.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {document && pdfDocument && (
-          <div className="mx-auto w-full">
-            {pageNumbers.map((pageNumber) => (
-              <PdfPage
-                key={`${document.id}-${pageNumber}`}
-                pdfDocument={pdfDocument}
-                pageNumber={pageNumber}
-                containerWidth={containerWidth}
-                zoom={zoom}
-                onPageSize={registerPageSize}
-              />
-            ))}
-          </div>
-        )}
-
+        {pdfDocument && pageNumbers.map((pageNumber) => (
+          <PdfPage
+            key={`${document.id}-${pageNumber}`}
+            pdfDocument={pdfDocument}
+            pageNumber={pageNumber}
+            containerWidth={containerWidth}
+            zoom={zoom}
+            onPageSize={registerPageSize}
+          />
+        ))}
         {isLoading && (
-          <div className="absolute left-4 top-4 inline-flex items-center gap-2 rounded-md bg-white px-3 py-2 text-sm font-semibold text-zinc-600 shadow-sm">
+          <div className="absolute left-3 top-3 inline-flex items-center gap-2 rounded-md bg-white px-3 py-2 text-sm font-semibold text-zinc-600 shadow-sm">
             <Loader2 className="animate-spin" size={16} />
             Loading PDF...
           </div>
         )}
       </div>
-    </section>
+    </article>
   );
 }
 
@@ -301,24 +327,35 @@ function IconButton({ label, disabled, onClick, children }) {
   );
 }
 
-function scrollToActiveCitation(container, citation, pageSizes) {
+function scrollToActiveCitation(container, section, citation, pageSizes) {
   const pageNumber = citationPageNumber(citation);
-  if (!container || !pageNumber) return;
+  if (!container || !section || !pageNumber) return;
 
-  const pageElement = container.querySelector(`[data-page-number="${pageNumber}"]`);
+  const pageElement = section.querySelector(`[data-page-number="${pageNumber}"]`);
   if (!pageElement) return;
 
+  const containerTop = container.getBoundingClientRect().top;
+  const pageTop = container.scrollTop + pageElement.getBoundingClientRect().top - containerTop;
   const pageSize = pageSizes[pageNumber];
   if (!citation?.bbox || !pageSize?.height) {
-    container.scrollTo({ top: Math.max(0, pageElement.offsetTop - 16), behavior: 'smooth' });
+    container.scrollTo({ top: Math.max(0, pageTop - 16), behavior: 'smooth' });
     return;
   }
 
   const pageHeight = citation.page_height || pageSize.baseHeight || pageSize.height;
   const citationTop = (citation.bbox[1] / pageHeight) * pageSize.height;
-  container.scrollTo({ top: Math.max(0, pageElement.offsetTop + citationTop - 120), behavior: 'smooth' });
+  container.scrollTo({ top: Math.max(0, pageTop + citationTop - 120), behavior: 'smooth' });
 }
 
 function citationPageNumber(citation) {
   return citation?.page_number || citation?.page_from || citation?.page_to || null;
+}
+
+function uniqueDocuments(documents) {
+  const seen = new Set();
+  return documents.filter((document) => {
+    if (!document?.id || seen.has(document.id)) return false;
+    seen.add(document.id);
+    return true;
+  });
 }

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 
 import { useAppContext } from '../../app/AppContext.jsx';
 import { ACCESS_TOKEN_KEY, apiFetch } from '../../api.js';
@@ -12,6 +12,17 @@ export function DashboardPage() {
   const { isAuthDisabled, notebooks, documents, chat, header } = useAppContext();
   const [selectedCitation, setSelectedCitation] = useState(null);
   const [viewerDocument, setViewerDocument] = useState(null);
+  const selectedDocumentKey = documents.selectedDocumentIds.join('|');
+  const viewerDocuments = useMemo(() => {
+    const byId = new Map(chat.selectedDocuments.map((document) => [String(document.id), document]));
+    if (viewerDocument?.id) byId.set(String(viewerDocument.id), viewerDocument);
+    return Array.from(byId.values());
+  }, [chat.selectedDocuments, viewerDocument]);
+
+  useEffect(() => {
+    setSelectedCitation(null);
+    setViewerDocument(null);
+  }, [selectedDocumentKey]);
 
   async function handleSourceSelect(source, sourceNumber) {
     const document = resolveCitationDocument(source, documents.documents, chat.selectedDocument);
@@ -45,7 +56,7 @@ export function DashboardPage() {
     <ResizableNotebookLayout
       storageKey={layoutStorageKey(header.user, notebooks.selectedNotebookId)}
       sources={(
-        <aside className="flex h-full min-h-0 flex-col gap-4 overflow-hidden">
+        <aside className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto pr-1">
           {!isAuthDisabled && <NotebookPanel {...notebooks} />}
           <DocumentsPanel {...documents} />
         </aside>
@@ -61,6 +72,7 @@ export function DashboardPage() {
       studio={(
         <PdfCitationViewer
           document={viewerDocument || chat.selectedDocument}
+          documents={viewerDocuments}
           activeCitation={selectedCitation?.source}
         />
       )}

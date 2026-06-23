@@ -23,11 +23,14 @@ const defaultUserSettings = {
   theme: 'light',
 };
 const SETTINGS_STORAGE_PREFIX = 'pdf-chatbot-settings:';
+const WORKSPACE_STORAGE_PREFIX = 'pdf-chatbot-workspace:';
 
 export function usePdfChatbotApp() {
+  const initialSessionUser = AUTH_DISABLED ? null : readStoredJson(USER_KEY);
+  const initialWorkspace = readStoredWorkspace(AUTH_DISABLED ? guestUser : initialSessionUser);
   const [accessToken, setAccessToken] = useState(() => (AUTH_DISABLED ? '' : localStorage.getItem(ACCESS_TOKEN_KEY) || ''));
-  const [user, setUser] = useState(() => (AUTH_DISABLED ? null : readStoredJson(USER_KEY)));
-  const [userSettings, setUserSettings] = useState(() => resolveStoredSettings(readStoredJson(USER_KEY)));
+  const [user, setUser] = useState(() => initialSessionUser);
+  const [userSettings, setUserSettings] = useState(() => resolveStoredSettings(initialSessionUser));
   const [settingsMessage, setSettingsMessage] = useState('');
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
@@ -41,18 +44,18 @@ export function usePdfChatbotApp() {
   const [isAuthLoading, setIsAuthLoading] = useState(false);
 
   const [notebooks, setNotebooks] = useState([]);
-  const [selectedNotebookId, setSelectedNotebookId] = useState('');
+  const [selectedNotebookId, setSelectedNotebookId] = useState(() => initialWorkspace.selectedNotebookId || '');
   const [newNotebookTitle, setNewNotebookTitle] = useState('');
   const [isNotebookLoading, setIsNotebookLoading] = useState(false);
 
   const [documents, setDocuments] = useState([]);
-  const [selectedDocumentId, setSelectedDocumentId] = useState('');
-  const [selectedDocumentIds, setSelectedDocumentIds] = useState([]);
-  const [messages, setMessages] = useState(initialMessages);
+  const [selectedDocumentId, setSelectedDocumentId] = useState(() => initialWorkspace.selectedDocumentId || '');
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState(() => initialWorkspace.selectedDocumentIds || []);
+  const [messages, setMessages] = useState(() => normalizeStoredMessages(initialWorkspace.messages));
   const [suggestedQuestions, setSuggestedQuestions] = useState([]);
   const [suggestionTitle, setSuggestionTitle] = useState('');
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
-  const [activeSessionId, setActiveSessionId] = useState('');
+  const [activeSessionId, setActiveSessionId] = useState(() => initialWorkspace.activeSessionId || '');
   const [chatSessions, setChatSessions] = useState([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [query, setQuery] = useState('');
@@ -76,6 +79,27 @@ export function usePdfChatbotApp() {
   const scopeLabel = buildScopeLabel(selectedDocuments);
   const hasReadyScope = readySelectedDocuments.length > 0;
 
+  useEffect(() => {
+    if (!effectiveUser) return;
+    localStorage.setItem(
+      workspaceStorageKey(effectiveUser),
+      JSON.stringify({
+        selectedNotebookId,
+        selectedDocumentId,
+        selectedDocumentIds,
+        activeSessionId,
+        messages,
+      })
+    );
+  }, [
+    effectiveUser?.email,
+    selectedNotebookId,
+    selectedDocumentId,
+    selectedDocumentIds.join('|'),
+    activeSessionId,
+    messages,
+  ]);
+
   const filteredDocuments = useMemo(() => {
     const normalized = search.trim().toLowerCase();
     if (!normalized) return documents;
@@ -93,9 +117,6 @@ export function usePdfChatbotApp() {
       setUser(null);
       setNotebooks([]);
       setSelectedNotebookId('');
-      setDocuments([]);
-      setSelectedDocumentId('');
-      setSelectedDocumentIds([]);
       setLastAnswer(null);
       loadDocuments('');
     } else {
@@ -240,7 +261,10 @@ export function usePdfChatbotApp() {
     try {
       const data = await authorizedFetch('/api/notebooks/');
       setNotebooks(data);
-      setSelectedNotebookId((current) => current || data[0]?.id || '');
+      setSelectedNotebookId((current) => {
+        if (current && data.some((notebook) => notebook.id === current)) return current;
+        return data[0]?.id || '';
+      });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -271,6 +295,36 @@ export function usePdfChatbotApp() {
     }
   }
 
+  async function deleteNotebook(notebookId = selectedNotebookId) {
+    if (!notebookId || AUTH_DISABLED) return;
+
+    setIsNotebookLoading(true);
+    setError('');
+    try {
+      await authorizedFetch(`/api/notebooks/${notebookId}`, { method: 'DELETE' });
+      setNotebooks((current) => {
+        const next = current.filter((notebook) => notebook.id !== notebookId);
+        setSelectedNotebookId((currentNotebookId) => {
+          if (currentNotebookId !== notebookId) return currentNotebookId;
+          return next[0]?.id || '';
+        });
+        return next;
+      });
+      setDocuments([]);
+      setSelectedDocumentId('');
+      setSelectedDocumentIds([]);
+      setActiveSessionId('');
+      setChatSessions([]);
+      setMessages(initialMessages);
+      setLastAnswer(null);
+      await loadNotebooks();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsNotebookLoading(false);
+    }
+  }
+
   async function loadDocuments(notebookId = selectedNotebookId) {
     if (!accessToken && !AUTH_DISABLED) return;
 
@@ -290,6 +344,30 @@ export function usePdfChatbotApp() {
         if (data.some((item) => item.id === current)) return current;
         return preferredDocumentId;
       });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsLoadingDocuments(false);
+    }
+  }
+
+  async function deleteDocument(documentId) {
+    if (!documentId) return;
+
+    setIsLoadingDocuments(true);
+    setError('');
+    try {
+      await authorizedFetch(`/api/documents/${documentId}`, { method: 'DELETE' });
+      setDocuments((current) => current.filter((document) => document.id !== documentId));
+      setSelectedDocumentIds((current) => current.filter((item) => item !== documentId));
+      setSelectedDocumentId((current) => {
+        if (current !== documentId) return current;
+        const remaining = documents.filter((document) => document.id !== documentId);
+        return remaining.find((document) => selectedDocumentIds.includes(document.id))?.id || remaining[0]?.id || '';
+      });
+      if (lastAnswer?.document_id === documentId || lastAnswer?.document_ids?.includes?.(documentId)) {
+        setLastAnswer(null);
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -356,6 +434,24 @@ export function usePdfChatbotApp() {
     }
   }
 
+  async function deleteChatSession(sessionId) {
+    if (!sessionId || !accessToken || AUTH_DISABLED) return;
+
+    setIsLoadingHistory(true);
+    setError('');
+    try {
+      await authorizedFetch(`/api/chat-sessions/${sessionId}`, { method: 'DELETE' });
+      setChatSessions((current) => current.filter((session) => session.id !== sessionId));
+      if (activeSessionId === sessionId) {
+        startNewChat();
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  }
+
   function startNewChat() {
     setActiveSessionId('');
     setMessages(initialMessages);
@@ -374,8 +470,10 @@ export function usePdfChatbotApp() {
       const next = current.includes(documentId)
         ? current.filter((item) => item !== documentId)
         : [...current, documentId];
-      if (!next.includes(selectedDocumentId)) {
-        setSelectedDocumentId(next[0] || documentId);
+      if (!next.length) {
+        setSelectedDocumentId('');
+      } else if (!next.includes(selectedDocumentId)) {
+        setSelectedDocumentId(next[0]);
       } else {
         setSelectedDocumentId(documentId);
       }
@@ -747,6 +845,7 @@ export function usePdfChatbotApp() {
       onSelectNotebook: setSelectedNotebookId,
       onNewNotebookTitleChange: setNewNotebookTitle,
       onCreateNotebook: createNotebook,
+      onDeleteNotebook: deleteNotebook,
     },
     documents: {
       documents,
@@ -765,9 +864,11 @@ export function usePdfChatbotApp() {
       onSearchChange: setSearch,
       onSelectDocument: selectDocument,
       onToggleDocumentScope: toggleDocumentScope,
+      onDeleteDocument: deleteDocument,
     },
     chat: {
       selectedDocument,
+      selectedDocumentIds,
       selectedDocuments,
       readySelectedDocuments,
       scopeLabel,
@@ -796,6 +897,7 @@ export function usePdfChatbotApp() {
       messages,
       onReload: () => loadChatSessions(),
       onSelectSession: loadChatSession,
+      onDeleteSession: deleteChatSession,
       onNewChat: startNewChat,
     },
     status: {
@@ -836,6 +938,34 @@ function resolveStoredSettings(owner, fallbackSettings = null) {
 
 function settingsStorageKey(user) {
   return `${SETTINGS_STORAGE_PREFIX}${user?.email || 'guest'}`;
+}
+
+function workspaceStorageKey(user) {
+  return `${WORKSPACE_STORAGE_PREFIX}${user?.email || 'guest'}`;
+}
+
+function readStoredWorkspace(owner) {
+  const workspace = readStoredJson(workspaceStorageKey(owner));
+  return {
+    selectedNotebookId: typeof workspace?.selectedNotebookId === 'string' ? workspace.selectedNotebookId : '',
+    selectedDocumentId: typeof workspace?.selectedDocumentId === 'string' ? workspace.selectedDocumentId : '',
+    selectedDocumentIds: Array.isArray(workspace?.selectedDocumentIds)
+      ? workspace.selectedDocumentIds.map(String).filter(Boolean)
+      : [],
+    activeSessionId: typeof workspace?.activeSessionId === 'string' ? workspace.activeSessionId : '',
+    messages: Array.isArray(workspace?.messages) ? workspace.messages : initialMessages,
+  };
+}
+
+function normalizeStoredMessages(messages) {
+  if (!Array.isArray(messages) || !messages.length) return initialMessages;
+  const normalized = messages.filter((message) => (
+    message &&
+    typeof message.id === 'string' &&
+    ['assistant', 'user'].includes(message.role) &&
+    typeof message.content === 'string'
+  ));
+  return normalized.length ? normalized : initialMessages;
 }
 
 function uniqueIds(values) {

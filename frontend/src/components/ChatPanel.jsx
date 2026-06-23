@@ -1,7 +1,7 @@
 import React from 'react';
 import { AlertCircle, Bot, CheckCircle2, FileQuestion, FileText, Loader2, Plus, Send, User } from 'lucide-react';
 
-import { displayDocumentTitle } from '../documentTitles.js';
+import { displayDocumentTitle, displayDocumentTopic, displayOriginalFileName } from '../documentTitles.js';
 import { formatStatus, statusClass } from '../formatters.js';
 
 export function ChatPanel({
@@ -29,14 +29,17 @@ export function ChatPanel({
   const visibleMessages = messages.filter((message) => message.id !== 'welcome');
   const hasUserMessages = visibleMessages.some((message) => message.role === 'user');
   const showSuggestions = hasReadyScope && !hasUserMessages;
-  const text = language === 'vi' ? viText : enText;
+  const text = language === 'vi'
+    ? { ...viText, answering: 'Đang tìm nội dung liên quan và tạo câu trả lời...' }
+    : enText;
+  const headerTopic = suggestionTitle || buildHeaderTopic(selectedDocuments, selectedDocument, text);
 
   return (
     <section className="flex h-full min-h-0 flex-col rounded-lg border border-zinc-200 bg-white shadow-sm">
       <div className="border-b border-zinc-200 px-4 py-3">
         <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
           <div className="min-w-0">
-            <h2 className="truncate text-lg font-bold">{scopeLabel || displayDocumentTitle(selectedDocument) || text.noFilesSelected}</h2>
+            <h2 className="truncate text-lg font-bold">{headerTopic}</h2>
             <SourceScopeList documents={selectedDocuments} language={language} />
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -154,15 +157,23 @@ function SourceScopeList({ documents, language }) {
         <span
           key={document.id}
           className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-semibold text-zinc-600"
-          title={document.original_file_name}
+          title={displayOriginalFileName(document)}
         >
           <FileText size={12} />
-          <span className="max-w-[180px] truncate">{displayDocumentTitle(document)}</span>
+          <span className="max-w-[180px] truncate">{displayOriginalFileName(document)}</span>
           <span className={`h-1.5 w-1.5 rounded-full ${document.status === 'processed' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
         </span>
       ))}
     </div>
   );
+}
+
+function buildHeaderTopic(selectedDocuments, selectedDocument, text) {
+  if (selectedDocuments.length > 1) {
+    const topics = selectedDocuments.map(displayDocumentTopic).filter(Boolean);
+    return topics.length ? topics.slice(0, 2).join(' / ') : `${text.selectedFiles} (${selectedDocuments.length})`;
+  }
+  return displayDocumentTopic(selectedDocuments[0] || selectedDocument) || displayDocumentTitle(selectedDocument) || text.noFilesSelected;
 }
 
 function SuggestedQuestions({ title, questions, isLoading, isDisabled, language, onSelect }) {
@@ -317,12 +328,13 @@ function renderCitedAnswer(content, sources = [], onSourceSelect) {
 }
 
 function formatPageLabel(source, language) {
+  const sectionLabel = language === 'vi' ? 'mục' : 'section';
   const text = language === 'vi'
-    ? { page: 'trang', pages: 'trang', chunk: 'đoạn' }
-    : { page: 'page', pages: 'pages', chunk: 'chunk' };
+    ? { page: 'trang', pages: 'trang' }
+    : { page: 'page', pages: 'pages' };
 
   if (source?.page_number) return `${text.page} ${source.page_number}`;
-  if (!source?.page_from && !source?.page_to) return `${text.chunk} ${source?.chunk_index ?? '-'}`;
+  if (!source?.page_from && !source?.page_to) return `${sectionLabel} ${source?.chunk_index ?? '-'}`;
   if (source.page_from && source.page_to && source.page_from !== source.page_to) {
     return `${text.pages} ${source.page_from}-${source.page_to}`;
   }
@@ -340,9 +352,11 @@ const enText = {
   processingBody: 'Chat will be ready when at least one selected PDF reaches Ready status.',
   askPlaceholder: 'Ask about the selected PDFs...',
   send: 'Send',
+  selectedFiles: 'Selected PDFs',
 };
 
 const viText = {
+  selectedFiles: 'PDF đã chọn',
   noFilesSelected: 'Chưa chọn tệp',
   ready: 'Sẵn sàng',
   newChat: 'Chat mới',

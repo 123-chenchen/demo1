@@ -63,7 +63,6 @@ def _extract_page_count(file_obj: BinaryIO) -> int | None:
 class DocumentUploadService:
     def upload_pdf(self, db: Session, *, upload_file: UploadFile, notebook_id=None) -> Document:
         original_file_name = _normalize_filename(upload_file.filename)
-        print(f"Starting upload of {original_file_name} with content type {upload_file.content_type}")
         if Path(original_file_name).suffix.lower() != ".pdf":
             raise DocumentUploadValidationError("Only .pdf files can be uploaded.")
 

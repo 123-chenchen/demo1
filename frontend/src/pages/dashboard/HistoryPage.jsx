@@ -1,5 +1,5 @@
 import React from 'react';
-import { MessageSquareText } from 'lucide-react';
+import { MessageSquareText, Trash2 } from 'lucide-react';
 
 import { useAppContext } from '../../app/AppContext.jsx';
 
@@ -11,6 +11,11 @@ export function HistoryPage() {
 
   async function openSession(sessionId) {
     await history.onSelectSession(sessionId);
+  }
+
+  async function deleteSession(session) {
+    if (!window.confirm(`${text.deleteChatConfirm} "${session.title || text.untitledChat}"?`)) return;
+    await history.onDeleteSession?.(session.id);
   }
 
   return (
@@ -27,24 +32,33 @@ export function HistoryPage() {
           {history.sessions.map((session) => {
             const isActive = session.id === history.activeSessionId;
             return (
-              <button
+              <article
                 key={session.id}
-                type="button"
                 className={`w-full rounded-lg border p-3 text-left transition ${
                   isActive ? 'border-teal-500 bg-teal-50 ring-4 ring-teal-100' : 'border-zinc-200 bg-white hover:border-zinc-300'
                 }`}
-                onClick={() => openSession(session.id)}
               >
                 <div className="flex items-start gap-3">
-                  <div className="rounded-lg bg-zinc-100 p-2 text-zinc-700">
-                    <MessageSquareText size={17} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-zinc-950">{session.title || text.untitledChat}</p>
-                    <p className="mt-1 text-xs text-zinc-500">{formatDate(session.updated_at || session.created_at)}</p>
-                  </div>
+                  <button type="button" className="flex min-w-0 flex-1 items-start gap-3 text-left" onClick={() => openSession(session.id)}>
+                    <div className="rounded-lg bg-zinc-100 p-2 text-zinc-700">
+                      <MessageSquareText size={17} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-zinc-950">{session.title || text.untitledChat}</p>
+                      <p className="mt-1 text-xs text-zinc-500">{formatDate(session.updated_at || session.created_at)}</p>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-rose-200 bg-white text-rose-600 hover:bg-rose-50"
+                    onClick={() => deleteSession(session)}
+                    aria-label={text.deleteChat}
+                    title={text.deleteChat}
+                  >
+                    <Trash2 size={15} />
+                  </button>
                 </div>
-              </button>
+              </article>
             );
           })}
 
@@ -98,9 +112,13 @@ const enText = {
   conversation: 'Conversation',
   relatedSources: 'related sources',
   selectChat: 'Select a saved chat to view its messages.',
+  deleteChat: 'Delete chat',
+  deleteChatConfirm: 'Delete chat',
 };
 
 const viText = {
+  deleteChat: 'Xóa chat',
+  deleteChatConfirm: 'Xóa chat',
   history: 'Lịch sử',
   savedChats: 'cuộc chat đã lưu',
   untitledChat: 'Cuộc chat chưa đặt tên',

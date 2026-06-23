@@ -99,7 +99,7 @@ export function ResizableNotebookLayout({ storageKey, sources, chat, studio }) {
       className="grid h-full min-h-0 w-full overflow-hidden px-4 py-4 lg:px-6"
       style={{ gridTemplateColumns }}
     >
-      <section className={`min-h-0 overflow-hidden ${isCompact ? 'invisible' : ''}`}>{sources}</section>
+      <section className={`min-h-0 overflow-y-auto overflow-x-hidden ${isCompact ? 'invisible' : ''}`}>{sources}</section>
       <ColumnDivider hidden={isCompact} label="Resize sources" onPointerDown={(event) => startDrag('source', event)} onDoubleClick={resetLayout} />
       <section className="min-h-0 overflow-hidden">{chat}</section>
       <ColumnDivider hidden={isCompact} label="Resize studio" onPointerDown={(event) => startDrag('studio', event)} onDoubleClick={resetLayout} />

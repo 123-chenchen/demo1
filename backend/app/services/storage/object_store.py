@@ -56,3 +56,10 @@ def get_object_buffer(bucket_name: str, object_name: str) -> BytesIO:
     finally:
         response.close()
         response.release_conn()
+
+
+def delete_object(bucket_name: str, object_name: str) -> None:
+    try:
+        get_minio_client().remove_object(bucket_name, object_name)
+    except S3Error as exc:
+        raise StorageServiceError("Could not delete object from MinIO.") from exc

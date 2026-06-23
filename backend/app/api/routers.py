@@ -6,13 +6,14 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from loguru import logger
+from sqlalchemy import delete, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.dependencies import get_current_user, get_current_user_optional, get_db
 from app.crud import CrudConflictError, chat_session_crud, document_content_crud, document_crud, notebook_crud
-from app.db.models import ChatMessage, ChatSession, MessageSource, Notebook, User
+from app.db.models import ChatMessage, ChatSession, Document, MessageSource, Notebook, User
 from app.db.models.document import DocumentChunk
 from app.schemas import (
     AuthMeRead,
@@ -61,7 +62,8 @@ from app.services.documents import (
     document_upload_service,
 )
 from app.services.retrieval.ingestion import document_ingest_service
-from app.services.storage import StorageServiceError, get_object_buffer, parse_storage_key
+from app.services.retrieval.vector_store import VectorStoreError, delete_points
+from app.services.storage import StorageServiceError, delete_object, get_object_buffer, parse_storage_key
 
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
 notebooks_router = APIRouter(prefix="/notebooks", tags=["notebooks"])
@@ -334,7 +336,43 @@ def update_notebook(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 # Hàm _resolve_selected_notebook_id sẽ được sử dụng trong các API có nhận tham số notebook_id để xác định xem notebook_id đó có hợp lệ và thuộc về người dùng hiện tại hay không. Nếu notebook_id không hợp lệ hoặc không thuộc về người dùng, nó sẽ ném ra lỗi HTTP 404 Not Found với thông điệp chi tiết. Nếu notebook_id hợp lệ, nó sẽ trả về UUID của notebook đó để các API khác có thể sử dụng để truy vấn dữ liệu liên quan đến notebook.
-def _resolve_selected_notebook_id( 
+@notebooks_router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_notebook(
+    item_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    notebook = notebook_crud.get_for_user(db, obj_id=item_id, user_id=current_user.id)
+    if notebook is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="notebook not found.")
+
+    documents = list(db.scalars(select(Document).where(Document.notebook_id == notebook.id)).all())
+    cleanup_items: list[dict[str, object]] = []
+
+    try:
+        db.execute(delete(ChatSession).where(ChatSession.notebook_id == notebook.id))
+        for document in documents:
+            cleanup_items.append(_prepare_document_delete(db, document=document))
+        db.delete(notebook)
+        db.commit()
+
+        if notebook_crud.get_default_for_user(db, user_id=current_user.id) is None:
+            auth_service.ensure_user_default_notebook(db, user=current_user)
+            db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Could not delete notebook.",
+        ) from exc
+
+    for cleanup_item in cleanup_items:
+        _cleanup_deleted_document_resources(cleanup_item)
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _resolve_selected_notebook_id(
     db: Session,
     *,
     current_user: User | None,
@@ -563,15 +601,56 @@ def delete_document(
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document not found.")
     try:
-        db.delete(document)
+        cleanup_item = _prepare_document_delete(db, document=document)
         db.commit()
-    except Exception as exc:
+    except SQLAlchemyError as exc:
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Could not delete Document because of a database constraint.",
         ) from exc
+
+    _cleanup_deleted_document_resources(cleanup_item)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _prepare_document_delete(db: Session, *, document: Document) -> dict[str, object]:
+    point_ids = [
+        point_id
+        for point_id in db.scalars(
+            select(DocumentChunk.qdrant_point_id).where(
+                DocumentChunk.document_id == document.id,
+                DocumentChunk.qdrant_point_id.is_not(None),
+            )
+        )
+        if point_id
+    ]
+    chunk_ids = select(DocumentChunk.id).where(DocumentChunk.document_id == document.id)
+    db.execute(delete(MessageSource).where(MessageSource.chunk_id.in_(chunk_ids)))
+    db.delete(document)
+    return {
+        "document_id": str(document.id),
+        "storage_key": document.storage_key,
+        "point_ids": point_ids,
+    }
+
+
+def _cleanup_deleted_document_resources(cleanup_item: dict[str, object]) -> None:
+    point_ids = cleanup_item.get("point_ids") or []
+    storage_key = str(cleanup_item.get("storage_key") or "")
+    document_id = cleanup_item.get("document_id")
+
+    if point_ids:
+        try:
+            delete_points([str(point_id) for point_id in point_ids])
+        except VectorStoreError as exc:
+            logger.warning("Could not delete vectors for document {}: {}", document_id, exc)
+
+    try:
+        bucket_name, object_name = parse_storage_key(storage_key)
+        delete_object(bucket_name, object_name)
+    except StorageServiceError as exc:
+        logger.warning("Could not delete stored PDF for document {}: {}", document_id, exc)
 
 
 @document_upload_router.post(

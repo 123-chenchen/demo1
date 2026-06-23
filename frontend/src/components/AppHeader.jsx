@@ -6,7 +6,6 @@ const navItems = [
   { to: '/dashboard', key: 'dashboard', icon: MessageSquareText },
   { to: '/documents', key: 'documents', icon: FileText },
   { to: '/history', key: 'history', icon: History },
-  { to: '/settings', key: 'settings', icon: Settings },
 ];
 
 export function AppHeader({ isAuthDisabled, language = 'en' }) {
@@ -32,6 +31,18 @@ export function AppHeader({ isAuthDisabled, language = 'en' }) {
                 {text.signInDisabled}
               </div>
             ) : null}
+            <NavLink
+              to="/settings"
+              className={({ isActive }) =>
+                `inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                  isActive ? 'bg-zinc-950 text-white' : 'border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50'
+                }`
+              }
+              title={text.nav.settings}
+            >
+              <Settings size={16} />
+              {text.nav.settings}
+            </NavLink>
           </div>
         </div>
 

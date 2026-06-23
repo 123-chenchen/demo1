@@ -1,5 +1,6 @@
 from app.services.storage.object_store import (
     StorageServiceError,
+    delete_object,
     ensure_bucket_exists,
     get_minio_client,
     get_object_buffer,
@@ -8,6 +9,7 @@ from app.services.storage.object_store import (
 
 __all__ = [
     "StorageServiceError",
+    "delete_object",
     "ensure_bucket_exists",
     "get_minio_client",
     "get_object_buffer",

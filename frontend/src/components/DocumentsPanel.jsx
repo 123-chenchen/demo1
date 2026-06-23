@@ -1,7 +1,7 @@
 import React from 'react';
-import { FileText, Loader2, RefreshCw, Search, UploadCloud } from 'lucide-react';
+import { FileText, Loader2, RefreshCw, Search, Trash2, UploadCloud } from 'lucide-react';
 
-import { displayDocumentTitle } from '../documentTitles.js';
+import { displayDocumentTitle, displayDocumentTopic, displayOriginalFileName } from '../documentTitles.js';
 import { formatBytes, formatStatus, statusClass } from '../formatters.js';
 
 export function DocumentsPanel({
@@ -20,11 +20,12 @@ export function DocumentsPanel({
   onSearchChange,
   onSelectDocument,
   onToggleDocumentScope,
+  onDeleteDocument,
 }) {
   const text = language === 'vi' ? viText : enText;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
+    <div className="flex flex-col gap-4">
       <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -68,7 +69,7 @@ export function DocumentsPanel({
         </div>
       </section>
 
-      <section className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+      <section className="space-y-2 pr-1">
         {filteredDocuments.map((document) => (
           <DocumentListItem
             key={document.id}
@@ -78,6 +79,7 @@ export function DocumentsPanel({
             language={language}
             onSelect={() => onSelectDocument(document.id)}
             onToggleScope={() => onToggleDocumentScope(document.id)}
+            onDelete={() => onDeleteDocument?.(document.id)}
           />
         ))}
 
@@ -97,8 +99,17 @@ export function DocumentsPanel({
   );
 }
 
-function DocumentListItem({ document, isFocused, isInScope, language, onSelect, onToggleScope }) {
+function DocumentListItem({ document, isFocused, isInScope, language, onSelect, onToggleScope, onDelete }) {
   const text = language === 'vi' ? viText : enText;
+  const topic = displayDocumentTopic(document) || displayDocumentTitle(document);
+  const originalFileName = displayOriginalFileName(document) || topic;
+
+  function confirmDelete(event) {
+    event.stopPropagation();
+    if (window.confirm(`${text.deleteFileConfirm} "${originalFileName}"?`)) {
+      onDelete?.();
+    }
+  }
 
   return (
     <article
@@ -123,14 +134,24 @@ function DocumentListItem({ document, isFocused, isInScope, language, onSelect, 
             <FileText size={18} />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold">{displayDocumentTitle(document)}</p>
+            <p className="truncate text-sm font-semibold">{topic}</p>
+            <p className="mt-0.5 truncate text-xs font-medium text-zinc-500" title={originalFileName}>{originalFileName}</p>
             <p className="mt-1 text-xs text-zinc-500">
-              {document.total_pages || 0} {text.pages} / {document.total_chunks || 0} {text.chunks} / {formatBytes(document.file_size_bytes)}
+              {document.total_pages || 0} {text.pages} / {document.total_chunks || 0} {text.sections} / {formatBytes(document.file_size_bytes)}
             </p>
             <span className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${statusClass(document.status)}`}>
               {formatStatus(document.status)}
             </span>
           </div>
+        </button>
+        <button
+          type="button"
+          className="mt-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-rose-200 bg-white text-rose-600 hover:bg-rose-50"
+          onClick={confirmDelete}
+          aria-label={text.deleteFile}
+          title={text.deleteFile}
+        >
+          <Trash2 size={15} />
         </button>
       </div>
     </article>
@@ -150,11 +171,16 @@ const enText = {
   noSources: 'No sources yet',
   noSourcesBody: 'Upload one or more PDFs. Ready files can be selected together for notebook-wide questions.',
   useInScope: 'Use in chat scope:',
+  deleteFile: 'Delete PDF',
+  deleteFileConfirm: 'Delete PDF',
   pages: 'pages',
-  chunks: 'chunks',
+  sections: 'text sections',
 };
 
 const viText = {
+  deleteFile: 'Xóa PDF',
+  deleteFileConfirm: 'Xóa PDF',
+  sections: 'mục nội dung',
   sources: 'Nguồn',
   inNotebook: 'trong',
   notebook: 'notebook',
@@ -168,5 +194,4 @@ const viText = {
   noSourcesBody: 'Tải lên một hoặc nhiều PDF. Các tệp Ready có thể được chọn cùng lúc để hỏi theo phạm vi notebook.',
   useInScope: 'Dùng trong phạm vi chat:',
   pages: 'trang',
-  chunks: 'đoạn',
 };

@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
+from app.api import routers
 from app.crud import notebook_crud
 from app.services.auth import auth_service
 
@@ -83,3 +84,60 @@ def test_create_notebook_uses_current_user(client, override_db, monkeypatch) -> 
 
     assert response.status_code == 201
     assert response.json()["title"] == "Project Alpha"
+
+
+def test_delete_notebook_removes_current_user_notebook(client, override_db, monkeypatch) -> None:
+    notebook_id = uuid4()
+    current_user = _current_user()
+
+    class EmptyScalarResult:
+        def all(self):
+            return []
+
+    class FakeDb:
+        def __init__(self):
+            self.deleted = []
+            self.commits = 0
+
+        def scalars(self, statement):
+            return EmptyScalarResult()
+
+        def execute(self, statement):
+            return None
+
+        def delete(self, item):
+            self.deleted.append(item)
+
+        def commit(self):
+            self.commits += 1
+
+        def rollback(self):
+            return None
+
+    db = override_db(FakeDb())
+    notebook = SimpleNamespace(**{**_notebook_payload(), "id": notebook_id})
+
+    def fake_get_current_user_from_access_token(db, *, token):
+        return current_user
+
+    def fake_get_for_user(db, *, obj_id, user_id):
+        assert obj_id == notebook_id
+        assert user_id == current_user.id
+        return notebook
+
+    def fake_get_default_for_user(db, *, user_id):
+        return object()
+
+    monkeypatch.setattr(auth_service, "get_current_user_from_access_token", fake_get_current_user_from_access_token)
+    monkeypatch.setattr(notebook_crud, "get_for_user", fake_get_for_user)
+    monkeypatch.setattr(notebook_crud, "get_default_for_user", fake_get_default_for_user)
+    monkeypatch.setattr(routers, "_cleanup_deleted_document_resources", lambda cleanup_item: None)
+
+    response = client.delete(
+        f"/api/notebooks/{notebook_id}",
+        headers={"Authorization": "Bearer access-token"},
+    )
+
+    assert response.status_code == 204
+    assert notebook in db.deleted
+    assert db.commits == 1
