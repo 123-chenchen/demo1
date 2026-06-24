@@ -64,17 +64,6 @@ _SUGGESTION_STOPWORDS = {
     "their",
     "this",
     "with",
-    "được",
-    "các",
-    "cho",
-    "của",
-    "đến",
-    "điều",
-    "liệu",
-    "này",
-    "nội",
-    "theo",
-    "trong",
 }
 
 
@@ -138,6 +127,7 @@ class ChatbotService:
                 db,
                 query=request.query,
                 document=accessible_document,
+                language=request.language,
                 max_chunks=min(max(request.top_k, 8), 12),
             )
             source_strategy = pipeline_result.source_strategy
@@ -145,6 +135,7 @@ class ChatbotService:
             pipeline_result = retrieval_qa_service.answer(
                 query=request.query,
                 top_k=request.top_k,
+                language=request.language,
                 document_id=accessible_document.id if accessible_document is not None else None,
                 document_ids=retrieval_document_ids if len(retrieval_document_ids) > 1 else None,
                 notebook_id=retrieval_notebook_id,
@@ -155,6 +146,7 @@ class ChatbotService:
                     pipeline_result = retrieval_qa_service.answer(
                         query=request.query,
                         top_k=request.top_k,
+                        language=request.language,
                         document_id=accessible_document.id,
                         document_ids=None,
                         notebook_id=retrieval_notebook_id,
@@ -177,6 +169,12 @@ class ChatbotService:
                 selected_notebook=session_notebook,
             )
             session_id = session.id
+            document_history_metadata = self._document_history_metadata(accessible_documents)
+            session.extra_metadata = {
+                **dict(session.extra_metadata or {}),
+                **document_history_metadata,
+            }
+            db.add(session)
 
             user_message = ChatMessage(
                 session_id=session.id,
@@ -186,6 +184,7 @@ class ChatbotService:
                     "top_k": request.top_k,
                     "document_id": str(accessible_document.id) if accessible_document else None,
                     "document_ids": [str(document.id) for document in accessible_documents],
+                    **document_history_metadata,
                     "resolved_document_id": str(context.resolved_document_id) if context.resolved_document_id else None,
                     "intent": intent.intent.value,
                     "intent_confidence": intent.confidence,
@@ -217,6 +216,7 @@ class ChatbotService:
                     "total_latency_ms": trace.total_latency_ms,
                     "document_id": str(accessible_document.id) if accessible_document else None,
                     "document_ids": [str(document.id) for document in accessible_documents],
+                    **document_history_metadata,
                 },
             )
             db.add(assistant_message)
@@ -251,6 +251,7 @@ class ChatbotService:
             ),
             "document_id": accessible_document.id if accessible_document else None,
             "document_ids": [document.id for document in accessible_documents],
+            "document_names": [document.original_file_name for document in accessible_documents],
             "session_id": session_id,
             "user_message_id": user_message_id,
             "assistant_message_id": assistant_message_id,
@@ -303,7 +304,7 @@ class ChatbotService:
             else []
         )
         return {
-            "title": self._suggestion_title(topics=topics, document_count=len(documents), language=request.language),
+            "title": self._suggestion_title(documents=documents),
             "topics": topics,
             "questions": questions,
         }
@@ -506,16 +507,20 @@ class ChatbotService:
         ]
         return [word for word, _count in Counter(words).most_common(8)]
 
-    def _suggestion_title(self, *, topics: list[str], document_count: int, language: str) -> str:
-        if topics:
-            if document_count > 1:
-                return " / ".join(topics[:2])
-            return topics[0]
-        return "Nguồn đã chọn" if language == "vi" else "Selected sources"
+    def _suggestion_title(self, *, documents: list[Document]) -> str:
+        file_names = [document.original_file_name for document in documents if document.original_file_name]
+        return " / ".join(file_names) if file_names else "Selected sources"
+
+    def _document_history_metadata(self, documents: list[Document]) -> dict[str, object]:
+        document_names = [document.original_file_name for document in documents if document.original_file_name]
+        return {
+            "document_names": document_names,
+            "document_name": document_names[0] if len(document_names) == 1 else None,
+        }
 
     def _empty_suggestions(self, *, language: str) -> dict[str, object]:
         return {
-            "title": "Chưa chọn nguồn" if language == "vi" else "No source selected",
+            "title": "No source selected",
             "topics": [],
             "questions": [],
         }
@@ -527,26 +532,9 @@ class ChatbotService:
         document_count: int,
         language: str,
     ) -> list[str]:
-        primary = topics[0] if topics else ("nội dung đã chọn" if language == "vi" else "the selected material")
+        primary = topics[0] if topics else "the selected material"
 
-        if language == "vi":
-            if document_count > 1:
-                questions = [
-                    "So sánh các cách tiếp cận được thảo luận trong các nguồn đã chọn.",
-                    "Những chủ đề chung nào xuất hiện trong các tài liệu đã chọn?",
-                    "Tóm tắt các phát hiện chính từ tất cả nguồn đã chọn.",
-                    f"Các tài liệu liên hệ với nhau như thế nào khi bàn về {primary}?",
-                    "Có điểm mâu thuẫn, bổ sung hoặc khoảng trống nào giữa các nguồn không?",
-                ]
-            else:
-                questions = [
-                    "Những ý chính được trình bày trong tài liệu này là gì?",
-                    "Tài liệu này tập trung vào vấn đề hoặc động lực nào?",
-                    "Phương pháp, kiến trúc hoặc quy trình nào được đề xuất?",
-                    f"Bằng chứng hoặc ví dụ nào hỗ trợ phần thảo luận về {primary}?",
-                    "Những thách thức, hạn chế hoặc hướng phát triển nào được nhắc đến?",
-                ]
-        elif document_count > 1:
+        if document_count > 1:
             questions = [
                 "Compare the approaches discussed across the selected sources.",
                 "What common themes appear in the selected documents?",
@@ -557,14 +545,13 @@ class ChatbotService:
         else:
             questions = [
                 "What are the main ideas presented in this paper?",
-                "What problem or motivation does this study focus on?",
-                "What approach, architecture, or method is proposed?",
-                f"What evidence or examples support the discussion of {primary}?",
-                "What challenges, limitations, or future work are discussed?",
+                "What problem or motivation does this report focus on?",
+                "What approach, architecture, or method is described in this document?",
+                "What evidence or examples are presented in this file?",
+                "What challenges, limitations, or future work does this document discuss?",
             ]
 
         return questions[:5]
-
     def _repair_document_index_if_needed(self, db: Session, *, document: Document) -> bool:
         if document.status != DocumentStatus.processed or document.total_chunks <= 0:
             return False

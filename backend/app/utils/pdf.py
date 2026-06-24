@@ -13,7 +13,6 @@ READ_CHUNK_SIZE = 1024 * 1024
 class PdfReadServiceError(Exception):
     pass
 
-# Hàm để kiểm tra xem tệp đã tải lên có phải là PDF hợp lệ bằng cách đọc các byte đầu tiên và so sánh với chữ ký PDF. Nếu tệp không phải là PDF hoặc có lỗi khi đọc, nó sẽ ném ra lỗi PdfReadServiceError với thông điệp chi tiết về lý do thất bại. Hàm này cũng sẽ trả về kích thước của tệp PDF nếu nó hợp lệ, điều này có thể hữu ích để xác thực thêm hoặc để lưu metadata của tài liệu trong cơ sở dữ liệu.
 def inspect_pdf(file_obj: BinaryIO) -> int: 
     file_obj.seek(0)
     signature = file_obj.read(len(PDF_SIGNATURE))

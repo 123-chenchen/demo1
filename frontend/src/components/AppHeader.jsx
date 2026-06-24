@@ -9,7 +9,7 @@ const navItems = [
 ];
 
 export function AppHeader({ isAuthDisabled, language = 'en' }) {
-  const text = language === 'vi' ? viText : enText;
+  const text = enText;
 
   return (
     <header className="shrink-0 border-b border-zinc-200 bg-white">
@@ -75,16 +75,5 @@ const enText = {
     documents: 'Documents',
     history: 'History',
     settings: 'Settings',
-  },
-};
-
-const viText = {
-  
-  signInDisabled: 'Đăng nhập đang tắt',
-  nav: {
-    dashboard: 'Chat',
-    documents: 'Tài liệu',
-    history: 'Lịch sử',
-    settings: 'Cài đặt',
   },
 };

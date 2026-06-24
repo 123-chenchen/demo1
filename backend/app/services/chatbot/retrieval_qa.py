@@ -21,6 +21,7 @@ class RetrievalQAService:
         *,
         query: str,
         top_k: int | None,
+        language: str | None = None,
         document_id=None,
         document_ids: Sequence[UUID] | None = None,
         notebook_id=None,
@@ -36,7 +37,7 @@ class RetrievalQAService:
         )
         return RetrievalQAResult(
             trace=trace,
-            generation=generate_answer(query=query, candidates=trace.candidates),
+            generation=generate_answer(query=query, candidates=trace.candidates, language=language),
         )
 
 

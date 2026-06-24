@@ -335,7 +335,6 @@ def update_notebook(
     except CrudConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
-# Hàm _resolve_selected_notebook_id sẽ được sử dụng trong các API có nhận tham số notebook_id để xác định xem notebook_id đó có hợp lệ và thuộc về người dùng hiện tại hay không. Nếu notebook_id không hợp lệ hoặc không thuộc về người dùng, nó sẽ ném ra lỗi HTTP 404 Not Found với thông điệp chi tiết. Nếu notebook_id hợp lệ, nó sẽ trả về UUID của notebook đó để các API khác có thể sử dụng để truy vấn dữ liệu liên quan đến notebook.
 @notebooks_router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_notebook(
     item_id: UUID,
@@ -671,7 +670,7 @@ def upload_document_pdf(
             current_user=current_user,
             notebook_id=notebook_id,
         )
-        return document_upload_service.upload_pdf( # upload PDF sẽ bao gồm cả việc validate file, upload file lên MinIO và tạo record Document trong database, nên có thể sẽ mất nhiều thời gian hơn so với các API khác, cần cân nhắc về việc có nên xử lý upload file và tạo record Document thành 2 bước riêng biệt hay không để cải thiện trải nghiệm người dùng
+        return document_upload_service.upload_pdf(
             db,
             upload_file=file,
             notebook_id=resolved_notebook_id,

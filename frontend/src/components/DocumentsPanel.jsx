@@ -1,7 +1,7 @@
 import React from 'react';
 import { FileText, Loader2, RefreshCw, Search, Trash2, UploadCloud } from 'lucide-react';
 
-import { displayDocumentTitle, displayDocumentTopic, displayOriginalFileName } from '../documentTitles.js';
+import { displayDocumentTitle, displayOriginalFileName } from '../documentTitles.js';
 import { formatBytes, formatStatus, statusClass } from '../formatters.js';
 
 export function DocumentsPanel({
@@ -22,7 +22,7 @@ export function DocumentsPanel({
   onToggleDocumentScope,
   onDeleteDocument,
 }) {
-  const text = language === 'vi' ? viText : enText;
+  const text = enText;
 
   return (
     <div className="flex flex-col gap-4">
@@ -89,9 +89,6 @@ export function DocumentsPanel({
               <FileText size={20} />
             </div>
             <h3 className="mt-3 text-sm font-bold text-zinc-950">{text.noSources}</h3>
-            <p className="mt-1 text-sm leading-6 text-zinc-500">
-              {text.noSourcesBody}
-            </p>
           </div>
         )}
       </section>
@@ -100,9 +97,8 @@ export function DocumentsPanel({
 }
 
 function DocumentListItem({ document, isFocused, isInScope, language, onSelect, onToggleScope, onDelete }) {
-  const text = language === 'vi' ? viText : enText;
-  const topic = displayDocumentTopic(document) || displayDocumentTitle(document);
-  const originalFileName = displayOriginalFileName(document) || topic;
+  const text = enText;
+  const originalFileName = displayOriginalFileName(document) || displayDocumentTitle(document);
 
   function confirmDelete(event) {
     event.stopPropagation();
@@ -134,10 +130,9 @@ function DocumentListItem({ document, isFocused, isInScope, language, onSelect, 
             <FileText size={18} />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold">{topic}</p>
-            <p className="mt-0.5 truncate text-xs font-medium text-zinc-500" title={originalFileName}>{originalFileName}</p>
+            <p className="truncate text-sm font-semibold" title={originalFileName}>{originalFileName}</p>
             <p className="mt-1 text-xs text-zinc-500">
-              {document.total_pages || 0} {text.pages} / {document.total_chunks || 0} {text.sections} / {formatBytes(document.file_size_bytes)}
+              {document.total_pages || 0} {text.pages} / {formatBytes(document.file_size_bytes)}
             </p>
             <span className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${statusClass(document.status)}`}>
               {formatStatus(document.status)}
@@ -169,29 +164,8 @@ const enText = {
   uploadPdf: 'Upload PDF files',
   searchFiles: 'Search files...',
   noSources: 'No sources yet',
-  noSourcesBody: 'Upload one or more PDFs. Ready files can be selected together for notebook-wide questions.',
   useInScope: 'Use in chat scope:',
   deleteFile: 'Delete PDF',
   deleteFileConfirm: 'Delete PDF',
   pages: 'pages',
-  sections: 'text sections',
-};
-
-const viText = {
-  deleteFile: 'Xóa PDF',
-  deleteFileConfirm: 'Xóa PDF',
-  sections: 'mục nội dung',
-  sources: 'Nguồn',
-  inNotebook: 'trong',
-  notebook: 'notebook',
-  public: 'công khai',
-  selected: 'đã chọn',
-  reloadDocuments: 'Tải lại tài liệu',
-  uploading: 'Đang tải lên và xử lý...',
-  uploadPdf: 'Tải PDF lên',
-  searchFiles: 'Tìm tài liệu...',
-  noSources: 'Chưa có nguồn',
-  noSourcesBody: 'Tải lên một hoặc nhiều PDF. Các tệp Ready có thể được chọn cùng lúc để hỏi theo phạm vi notebook.',
-  useInScope: 'Dùng trong phạm vi chat:',
-  pages: 'trang',
 };

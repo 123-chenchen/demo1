@@ -151,12 +151,12 @@ class ForgotPasswordVerifyRequest(AppSchema):
 
 
 class UserSettingsRead(AppSchema):
-    language: Literal["en", "vi"] = "en"
+    language: Literal["en"] = "en"
     theme: Literal["light", "dark"] = "light"
 
 
 class UserSettingsUpdate(AppSchema):
-    language: Literal["en", "vi"] | None = None
+    language: Literal["en"] | None = None
     theme: Literal["light", "dark"] | None = None
 
 
@@ -492,6 +492,7 @@ class ChatbotAskRequest(AppSchema):
     document_ids: list[UUID] = Field(default_factory=list)
     session_id: UUID | None = None
     save_history: bool = True
+    language: Literal["en"] | None = None
 
 
 class ChatbotAskResponse(AppSchema):
@@ -500,6 +501,7 @@ class ChatbotAskResponse(AppSchema):
     notebook_id: UUID | None = None
     document_id: UUID | None = None
     document_ids: list[UUID] = Field(default_factory=list)
+    document_names: list[str] = Field(default_factory=list)
     session_id: UUID | None = None
     user_message_id: UUID | None = None
     assistant_message_id: UUID | None = None
@@ -518,7 +520,7 @@ class ChatbotSuggestionsRequest(AppSchema):
     notebook_id: UUID | None = None
     document_id: UUID | None = None
     document_ids: list[UUID] = Field(default_factory=list)
-    language: Literal["en", "vi"] = "en"
+    language: Literal["en"] = "en"
 
 
 class ChatbotSuggestionsResponse(AppSchema):

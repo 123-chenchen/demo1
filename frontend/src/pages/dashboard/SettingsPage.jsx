@@ -15,8 +15,7 @@ export function SettingsPage() {
 
   const user = settings.user;
   const displayName = resolveUserDisplayName(user);
-  const isVietnamese = settings.values.language === 'vi';
-  const text = isVietnamese ? viText : enText;
+  const text = enText;
 
   async function submitPasswordChange(event) {
     event.preventDefault();
@@ -53,25 +52,9 @@ export function SettingsPage() {
               {text.signOut}
             </button>
           )}
-        </Panel>
-
-        <Panel title={text.preferences} icon={Languages}>
-          <SettingGroup label={text.language}>
-            <SegmentedButton
-              active={settings.values.language === 'en'}
-              disabled={settings.isSaving}
-              onClick={() => settings.onUpdate({ language: 'en' })}
-            >
-              English
-            </SegmentedButton>
-            <SegmentedButton
-              active={settings.values.language === 'vi'}
-              disabled={settings.isSaving}
-              onClick={() => settings.onUpdate({ language: 'vi' })}
-            >
-              Tiếng Việt
-            </SegmentedButton>
-          </SettingGroup>
+    
+      
+          
 
           <SettingGroup label={text.theme}>
             <SegmentedButton
@@ -98,7 +81,8 @@ export function SettingsPage() {
               {settings.message}
             </p>
           )}
-        </Panel>
+       </Panel>
+
       </section>
 
       <section className="space-y-4">
@@ -244,12 +228,11 @@ function emailPrefix(email) {
 const enText = {
   accountProfile: 'Account / Profile',
   profile: 'Profile',
-  preferences: 'Preferences',
   email: 'Email',
   name: 'Name',
   unknown: 'Unknown',
   notSet: 'Not set',
-  language: 'Language',
+
   theme: 'Theme',
   lightMode: 'Light mode',
   darkMode: 'Dark mode',
@@ -263,28 +246,4 @@ const enText = {
   typeDelete: 'Type DELETE to confirm',
   deleting: 'Deleting...',
   signOut: 'Sign out',
-};
-
-const viText = {
-  accountProfile: 'Tài khoản / Hồ sơ',
-  signOut: 'Đăng xuất',
-  profile: 'Hồ sơ',
-  preferences: 'Tùy chọn',
-  email: 'Email',
-  name: 'Tên',
-  unknown: 'Không rõ',
-  notSet: 'Chưa đặt',
-  language: 'Ngôn ngữ',
-  theme: 'Giao diện',
-  lightMode: 'Chế độ sáng',
-  darkMode: 'Chế độ tối',
-  changePassword: 'Đổi mật khẩu',
-  currentPassword: 'Mật khẩu hiện tại',
-  newPassword: 'Mật khẩu mới',
-  confirmNewPassword: 'Xác nhận mật khẩu mới',
-  saving: 'Đang lưu...',
-  updatePassword: 'Cập nhật mật khẩu',
-  deleteAccount: 'Xóa tài khoản',
-  typeDelete: 'Nhập DELETE để xác nhận',
-  deleting: 'Đang xóa...',
 };

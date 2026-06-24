@@ -22,18 +22,17 @@ PDF_SIGNATURE = b"%PDF-"
 READ_CHUNK_SIZE = 1024 * 1024
 
 
-class DocumentUploadValidationError(Exception): # lỗi xác thực khi tải lên tài liệu, ví dụ: tệp không phải PDF, tệp bị hỏng, v.v.
+class DocumentUploadValidationError(Exception):
     pass
 
 
-class DocumentUploadConflictError(Exception): # lỗi xung đột khi lưu metadata của tài liệu đã tải lên vào cơ sở dữ liệu, ví dụ: vi phạm ràng buộc duy nhất, v.v.
+class DocumentUploadConflictError(Exception):
     pass
 
 
-class DocumentUploadStorageError(Exception): # lỗi khi lưu trữ tệp PDF đã tải lên vào MinIO, ví dụ: lỗi kết nối, lỗi xác thực, v.v.
+class DocumentUploadStorageError(Exception):
     pass
 
-# Hàm để chuẩn hóa tên tệp gốc, đảm bảo rằng nó không chứa đường dẫn và có phần mở rộng .pdf mặc định nếu tên tệp không hợp lệ hoặc trống
 def _normalize_filename(filename: str | None) -> str:
     if not filename:
         return "document.pdf"
@@ -41,14 +40,12 @@ def _normalize_filename(filename: str | None) -> str:
     safe_name = filename.replace("\\", "/").split("/")[-1].strip()
     return safe_name or "document.pdf"
 
-# Tạo tên đối tượng duy nhất và an toàn cho MinIO dựa trên tên tệp gốc và ngày hiện tại
 def _build_object_name(original_file_name: str) -> str:
     stem = Path(original_file_name).stem or "document"
     safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip(".-_") or "document"
     date_prefix = datetime.now(timezone.utc).strftime("%Y/%m/%d")
     return f"documents/{date_prefix}/{uuid.uuid4()}-{safe_stem}.pdf"
 
-# Hàm để kiểm tra xem tệp đã tải lên có phải là PDF hợp lệ bằng cách đọc các byte đầu tiên và so sánh với chữ ký PDF. Nếu tệp không phải là PDF hoặc có lỗi khi đọc, nó sẽ ném ra lỗ
 def _inspect_pdf(file_obj: BinaryIO) -> int:
     try:
         return inspect_pdf(file_obj)

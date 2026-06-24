@@ -20,7 +20,7 @@ class ConversationContext:
 
 class ConversationContextService:
     _document_reference_pattern = re.compile(
-        r"\b(n[oó]|cai nay|cái này|tai lieu nay|tài liệu này|file nay|file này|pdf nay|pdf này|o day|ở đây|this|it|this document|this file)\b",
+        r"\b(this|it|this document|this file)\b",
         re.IGNORECASE,
     )
 

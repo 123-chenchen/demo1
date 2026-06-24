@@ -25,10 +25,10 @@ class DocumentSummaryService:
     retriever_name = "document-summary"
     vector_store_name = "database"
     _section_patterns = {
-        "title": re.compile(r"^\s*(title|tieu de|tiêu đề)\s*[:\n]", re.IGNORECASE),
-        "abstract": re.compile(r"^\s*(abstract|tom tat|tóm tắt)\s*[:\n]", re.IGNORECASE),
-        "introduction": re.compile(r"^\s*(introduction|gioi thieu|giới thiệu|mo dau|mở đầu)\s*[:\n]", re.IGNORECASE),
-        "conclusion": re.compile(r"^\s*(conclusion|ket luan|kết luận|summary|discussion)\s*[:\n]", re.IGNORECASE),
+        "title": re.compile(r"^\s*title\s*[:\n]", re.IGNORECASE),
+        "abstract": re.compile(r"^\s*abstract\s*[:\n]", re.IGNORECASE),
+        "introduction": re.compile(r"^\s*introduction\s*[:\n]", re.IGNORECASE),
+        "conclusion": re.compile(r"^\s*(conclusion|summary|discussion)\s*[:\n]", re.IGNORECASE),
     }
 
     def summarize(
@@ -37,6 +37,7 @@ class DocumentSummaryService:
         *,
         query: str,
         document: Document,
+        language: str | None = None,
         max_chunks: int = 10,
     ) -> DocumentSummaryResult:
         settings = get_settings()
@@ -52,6 +53,7 @@ class DocumentSummaryService:
             query=query,
             candidates=candidates,
             document_title=document.original_file_name,
+            language=language,
         )
 
         return DocumentSummaryResult(

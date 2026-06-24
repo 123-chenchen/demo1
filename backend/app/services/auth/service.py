@@ -195,7 +195,7 @@ def _settings_from_metadata(metadata: object) -> dict[str, str]:
     language = raw_settings.get("language")
     theme = raw_settings.get("theme")
     return {
-        "language": language if language in {"en", "vi"} else "en",
+        "language": "en",
         "theme": theme if theme in {"light", "dark"} else "light",
     }
 

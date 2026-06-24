@@ -1,0 +1,10 @@
+﻿{
+    "total_questions":  30,
+    "functional_pass_rate":  0.8333,
+    "precision_at_1":  0.8,
+    "precision_at_3":  0.6667,
+    "precision_at_5":  0.62,
+    "mean_reciprocal_rank":  0.8483,
+    "average_grounding_score":  0.8833,
+    "average_response_time_seconds":  67.9823
+}

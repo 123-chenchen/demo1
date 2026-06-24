@@ -15,13 +15,6 @@ def test_detects_english_document_summary_intent() -> None:
     assert result.confidence > 0.8
 
 
-def test_detects_vietnamese_document_summary_intent() -> None:
-    result = IntentDetectionService().detect("Ý chính của tài liệu là gì?")
-
-    assert result.intent == ChatIntent.DOCUMENT_SUMMARY
-    assert result.confidence > 0.8
-
-
 def test_keeps_specific_question_on_retrieval_qa_path() -> None:
     result = IntentDetectionService().detect("What embedding model is used?")
 
@@ -55,7 +48,7 @@ def test_summary_selection_samples_entire_document_when_sections_missing() -> No
     assert len(selected) == 5
 
 
-def test_suggested_questions_use_content_topic_not_filename() -> None:
+def test_suggestions_use_original_filename_and_generic_document_references() -> None:
     service = ChatbotService()
     document_id = uuid4()
     document = SimpleNamespace(
@@ -76,10 +69,15 @@ def test_suggested_questions_use_content_topic_not_filename() -> None:
         document_count=1,
         language="en",
     )
+    title = service._suggestion_title(documents=[document])
 
     assert topics[0] == "Risk management strategy"
-    assert all(".pdf" not in question.lower() for question in questions)
-    assert any("Risk management strategy" in question for question in questions)
+    assert title == "quarterly-plan.pdf"
+    assert all("Risk management strategy" not in question for question in questions)
+    assert any("this report" in question for question in questions)
+    assert any("this paper" in question for question in questions)
+    assert any("this file" in question for question in questions)
+    assert any("this document" in question for question in questions)
 
 
 def _chunk(index: int, content: str, page: int):

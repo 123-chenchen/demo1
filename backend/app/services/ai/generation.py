@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
-import unicodedata
+import re
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -24,6 +24,14 @@ class AnswerGenerationError(Exception):
     pass
 
 
+def _required_answer_language(query: str, language: str | None = None) -> str:
+    return "English"
+
+
+def _answer_language_for(query: str) -> str:
+    return "English"
+
+
 def _build_context_block(candidates: list[ChunkCandidate]) -> str:
     lines: list[str] = []
     for index, candidate in enumerate(candidates, start=1):
@@ -41,25 +49,120 @@ def _build_context_block(candidates: list[ChunkCandidate]) -> str:
     return "\n\n".join(lines)
 
 
-def _answer_language_for(query: str) -> str:
-    normalized = query.lower()
-    decomposed = unicodedata.normalize("NFD", normalized)
-    if "đ" in normalized or any(unicodedata.combining(char) for char in decomposed):
-        return "Vietnamese"
-    return "the same language as the question"
-
-
 def _clean_model_answer(answer: str) -> str:
     cleaned_lines = []
     for line in answer.splitlines():
         stripped = line.strip()
-        if stripped.lower().startswith("(vietnamese:") and stripped.endswith(")"):
+        if stripped.lower().startswith("(translation:") and stripped.endswith(")"):
             continue
         cleaned_lines.append(line)
     return "\n".join(cleaned_lines).strip()
 
 
-def _extractive_fallback(query: str, candidates: list[ChunkCandidate]) -> AnswerGenerationResult:
+def _is_low_information_answer(*, query: str, answer: str) -> bool:
+    without_citations = re.sub(r"\[\d+\]", " ", answer)
+    normalized_answer = " ".join(without_citations.strip().split()).strip(" .,:;!?\"'")
+    if not normalized_answer:
+        return True
+    normalized_query = " ".join(query.strip().split()).strip(" .,:;!?\"'")
+    if normalized_query and normalized_answer.lower() == normalized_query.lower():
+        return True
+    lower_answer = normalized_answer.lower()
+    navigation_starts = ("see ", "refer to ", "look at ")
+    if any(lower_answer.startswith(prefix) for prefix in navigation_starts):
+        return True
+    return len(normalized_answer.split()) <= 2
+
+
+def _has_language_mismatch(*, answer: str, required_language: str) -> bool:
+    if required_language != "English":
+        return False
+    answer_without_citations = re.sub(r"\[\d+\]", "", answer)
+    return any(ord(char) > 127 for char in answer_without_citations)
+
+
+def _is_unhelpful_insufficient_answer(answer: str) -> bool:
+    lowered = answer.lower()
+    markers = (
+        "does not provide",
+        "does not contain",
+        "not enough information",
+        "cannot be determined",
+    )
+    return any(marker in lowered for marker in markers)
+
+
+def _insufficient_answer_for(language: str | None = None) -> str:
+    return "The document does not provide enough information to answer this question."
+
+
+def _sentence_candidates(text: str) -> list[str]:
+    normalized = " ".join(text.replace("\x00", " ").split())
+    if not normalized:
+        return []
+    sentences = re.split(r"(?<=[.!?])\s+", normalized)
+    useful = []
+    for sentence in sentences:
+        sentence = sentence.strip(" -\t\r\n")
+        word_count = len(sentence.split())
+        if 6 <= word_count <= 80:
+            useful.append(sentence)
+    if useful:
+        return useful
+    return [normalized[:320].strip()]
+
+
+def _query_terms(query: str) -> set[str]:
+    stopwords = {"show", "what", "where", "when", "how", "why", "the", "this", "that", "are", "is"}
+    return {
+        term.lower()
+        for term in re.findall(r"[^\W\d_][\w\-]{2,}", query, flags=re.UNICODE)
+        if term.lower() not in stopwords
+    }
+
+
+def _extractive_synthesis(
+    *,
+    query: str,
+    candidates: list[ChunkCandidate],
+    language: str | None = None,
+    max_points: int = 3,
+) -> str:
+    if not candidates:
+        return _insufficient_answer_for()
+
+    terms = _query_terms(query)
+    ranked: list[tuple[int, int, str]] = []
+    for source_index, candidate in enumerate(candidates[:5], start=1):
+        for sentence in _sentence_candidates(candidate.content)[:4]:
+            score = sum(1 for term in terms if term in sentence.lower())
+            ranked.append((score, source_index, sentence))
+
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    selected: list[tuple[int, str]] = []
+    seen: set[str] = set()
+    for _score, source_index, sentence in ranked:
+        normalized = sentence.lower()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        selected.append((source_index, sentence))
+        if len(selected) >= max_points:
+            break
+
+    if not selected:
+        return _insufficient_answer_for()
+
+    lines = ["Summary from the relevant passages:"]
+    lines.extend(f"- {sentence} [{source_index}]" for source_index, sentence in selected)
+    return "\n".join(lines)
+
+
+def _extractive_fallback(
+    query: str,
+    candidates: list[ChunkCandidate],
+    language: str | None = None,
+) -> AnswerGenerationResult:
     if not candidates:
         return AnswerGenerationResult(
             answer=(
@@ -71,17 +174,11 @@ def _extractive_fallback(query: str, candidates: list[ChunkCandidate]) -> Answer
             used_fallback=True,
         )
 
-    snippets = []
-    for index, candidate in enumerate(candidates[:3], start=1):
-        excerpt = " ".join(candidate.content.split())
-        if len(excerpt) > 280:
-            excerpt = f"{excerpt[:280]}..."
-        snippets.append(f"[{index}] {excerpt}")
-
+    synthesis = _extractive_synthesis(query=query, candidates=candidates)
     return AnswerGenerationResult(
         answer=(
-            "No external chat model is configured, so this is a retrieval-grounded fallback response.\n\n"
-            + "\n".join(snippets)
+            "No external chat model is configured, so this is a synthesized fallback from retrieved passages.\n\n"
+            + synthesis
         ),
         provider="extractive",
         model_name=None,
@@ -125,22 +222,17 @@ def _get_prompt_template() -> ChatPromptTemplate:
         [
             (
                 "system",
-                "You are a careful document-grounded chatbot. "
-                "Use only the supplied context; do not add outside knowledge. "
-                "If the user asks for a summary, main idea, overview, or purpose of the document, "
-                "summarize the entire document instead of answering from a small retrieved chunk. "
-                "If the context does not contain enough evidence, say that the document does not provide enough information. "
-                "If the answer cannot be determined from retrieved content, explicitly state that instead of hallucinating. "
-                "Follow the required answer language exactly. "
-                "If the required answer language is Vietnamese, every sentence must be Vietnamese and must not be English. "
-                "Do not include translations, bilingual notes, or parenthetical restatements in another language. "
-                "Write directly, without greetings or preambles. "
-                "Synthesize the relevant facts into 2-5 concise sentences or short bullets. "
-                "Cite every factual claim with supporting snippet numbers like [1], [2].",
+                "Answer only in English using only the supplied context and no outside knowledge. "
+                "Synthesize relevant evidence, especially any tools, techniques, workflows, UI, or database actions. "
+                "Label indirect conclusions as inferences and do not overstate them. "
+                "Do not claim insufficient information when relevant evidence exists. "
+                "Only when there is truly not enough evidence, reply exactly: "
+                "'The document does not provide enough information to answer this question.' "
+                "Answer in 2-5 concise sentences or short bullets and support claims with citations such as [1], [2].",
             ),
             (
                 "human",
-                "Required answer language: {answer_language}\n\nQuestion:\n{question}\n\nContext:\n{context}",
+                "Required answer language: English\n\nQuestion:\n{question}\n\nContext:\n{context}",
             ),
         ]
     )
@@ -152,21 +244,18 @@ def _get_summary_prompt_template() -> ChatPromptTemplate:
         [
             (
                 "system",
-                "You are a careful document-grounded summarization assistant. "
-                "Use only the supplied document-level context; do not add outside knowledge. "
-                "The user is asking for a summary, main idea, overview, or purpose of the document, "
-                "so summarize the entire document represented by the supplied title, structural sections, "
-                "and representative excerpts instead of focusing on one small passage. "
-                "If the context does not contain enough evidence, explicitly say that the document content is insufficient. "
-                "Follow the required answer language exactly. "
-                "If the required answer language is Vietnamese, every sentence must be Vietnamese and must not be English. "
-                "Write a concise summary followed by 3-6 key points. "
-                "Cite every factual claim with supporting snippet numbers like [1], [2]. "
-                "Prefer citing title/front matter, abstract, introduction, and conclusion snippets when available.",
+                "Answer only in English using only the supplied document context and no outside knowledge. "
+                "Summarize the document as a whole from its title, sections, and representative excerpts. "
+                "Clearly synthesize any tools, techniques, workflows, UI, or database actions mentioned. "
+                "Label indirect conclusions as inferences and do not overstate them. "
+                "Do not claim insufficient information when relevant evidence exists. "
+                "Only when there is truly not enough evidence, reply exactly: "
+                "'The document does not provide enough information to answer this question.' "
+                "Answer in 2-5 concise sentences or short bullets and support claims with citations such as [1], [2].",
             ),
             (
                 "human",
-                "Required answer language: {answer_language}\n\n"
+                "Required answer language: English\n\n"
                 "Document title: {document_title}\n\n"
                 "Question:\n{question}\n\n"
                 "Document-level context:\n{context}",
@@ -175,32 +264,51 @@ def _get_summary_prompt_template() -> ChatPromptTemplate:
     )
 
 
-def _run_model_chain(*, model, query: str, candidates: list[ChunkCandidate]) -> str:
+def _run_model_chain(*, model, query: str, candidates: list[ChunkCandidate], language: str | None = None) -> str:
     chain = _get_prompt_template() | model | StrOutputParser()
     answer = chain.invoke(
         {
             "question": query,
-            "answer_language": _answer_language_for(query),
             "context": _build_context_block(candidates),
         }
     )
-    return _clean_model_answer(answer)
+    cleaned = _clean_model_answer(answer)
+    if (
+        _is_low_information_answer(query=query, answer=cleaned)
+        or _has_language_mismatch(answer=cleaned, required_language="English")
+        or _is_unhelpful_insufficient_answer(cleaned)
+    ):
+        return _extractive_synthesis(query=query, candidates=candidates)
+    return cleaned
 
 
-def _run_summary_chain(*, model, query: str, candidates: list[ChunkCandidate], document_title: str) -> str:
+def _run_summary_chain(
+    *,
+    model,
+    query: str,
+    candidates: list[ChunkCandidate],
+    document_title: str,
+    language: str | None = None,
+) -> str:
     chain = _get_summary_prompt_template() | model | StrOutputParser()
     answer = chain.invoke(
         {
             "question": query,
-            "answer_language": _answer_language_for(query),
             "document_title": document_title,
             "context": _build_context_block(candidates),
         }
     )
-    return _clean_model_answer(answer)
+    cleaned = _clean_model_answer(answer)
+    if (
+        _is_low_information_answer(query=query, answer=cleaned)
+        or _has_language_mismatch(answer=cleaned, required_language="English")
+        or _is_unhelpful_insufficient_answer(cleaned)
+    ):
+        return _extractive_synthesis(query=query, candidates=candidates, max_points=5)
+    return cleaned
 
 
-def generate_answer(*, query: str, candidates: list[ChunkCandidate]) -> AnswerGenerationResult:
+def generate_answer(*, query: str, candidates: list[ChunkCandidate], language: str | None = None) -> AnswerGenerationResult:
     if not candidates:
         return _extractive_fallback(query, candidates)
 
@@ -259,6 +367,7 @@ def generate_document_summary(
     query: str,
     candidates: list[ChunkCandidate],
     document_title: str,
+    language: str | None = None,
 ) -> AnswerGenerationResult:
     if not candidates:
         return _extractive_fallback(query, candidates)

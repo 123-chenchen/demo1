@@ -160,7 +160,7 @@ export function usePdfChatbotApp() {
       body: JSON.stringify({
         notebook_id: selectedNotebookId || null,
         document_ids: readySelectedDocuments.map((document) => document.id),
-        language: userSettings.language,
+        language: 'en',
       }),
     })
       .then((data) => {
@@ -409,6 +409,7 @@ export function usePdfChatbotApp() {
           role: message.role,
           content: message.content,
           sources: message.sources || [],
+          metadata: message.metadata || {},
         })),
       ]);
 
@@ -500,7 +501,7 @@ export function usePdfChatbotApp() {
     setSettingsMessage('');
 
     if (AUTH_DISABLED) {
-      setSettingsMessage(nextSettings.language === 'vi' ? 'Đã lưu cài đặt.' : 'Settings saved.');
+      setSettingsMessage('Settings saved.');
       return;
     }
 
@@ -515,7 +516,7 @@ export function usePdfChatbotApp() {
         localStorage.setItem(USER_KEY, JSON.stringify(nextUser));
         return nextUser;
       });
-      setSettingsMessage(savedSettings.language === 'vi' ? 'Đã lưu cài đặt.' : 'Settings saved.');
+      setSettingsMessage('Settings saved.');
     } catch (err) {
       setUserSettings(previousSettings);
       localStorage.setItem(settingsStorageKey(effectiveUser), JSON.stringify(previousSettings));
@@ -538,7 +539,7 @@ export function usePdfChatbotApp() {
       localStorage.setItem(USER_KEY, JSON.stringify(nextUser));
       return nextUser;
     });
-    setSettingsMessage(nextSettings.language === 'vi' ? 'Đã lưu cài đặt.' : 'Settings saved.');
+    setSettingsMessage('Settings saved.');
     setIsSavingSettings(false);
   }
 
@@ -736,7 +737,7 @@ export function usePdfChatbotApp() {
 
     const scopedDocuments = selectedDocuments.filter((document) => document.status === 'processed');
     if (!scopedDocuments.length) {
-      setError(userSettings.language === 'vi' ? 'Vui lòng chọn ít nhất 1 PDF đã xử lý trước khi hỏi.' : 'Select at least one processed PDF before asking.');
+      setError('Select at least one processed PDF before asking.');
       return;
     }
 
@@ -747,6 +748,10 @@ export function usePdfChatbotApp() {
         role: 'user',
         content: trimmed,
         sources: [],
+        metadata: {
+          document_ids: scopedDocuments.map((document) => document.id),
+          document_names: scopedDocuments.map((document) => document.original_file_name).filter(Boolean),
+        },
       },
     ]);
     setQuery('');
@@ -765,6 +770,7 @@ export function usePdfChatbotApp() {
           session_id: activeSessionId || null,
           top_k: 5,
           save_history: true,
+          language: 'en',
         }),
       });
 
@@ -780,6 +786,10 @@ export function usePdfChatbotApp() {
           role: 'assistant',
           content: answer.answer,
           sources: answer.sources || [],
+          metadata: {
+            document_ids: answer.document_ids || scopedDocuments.map((document) => document.id),
+            document_names: answer.document_names || scopedDocuments.map((document) => document.original_file_name).filter(Boolean),
+          },
         },
       ]);
     } catch (err) {
@@ -832,7 +842,7 @@ export function usePdfChatbotApp() {
     header: {
       user: effectiveUser,
       isAuthDisabled: AUTH_DISABLED,
-      language: userSettings.language,
+      language: 'en',
       onLogout: logout,
     },
     notebooks: {
@@ -840,7 +850,7 @@ export function usePdfChatbotApp() {
       selectedNotebookId,
       newNotebookTitle,
       isNotebookLoading,
-      language: userSettings.language,
+      language: 'en',
       onReload: loadNotebooks,
       onSelectNotebook: setSelectedNotebookId,
       onNewNotebookTitleChange: setNewNotebookTitle,
@@ -857,7 +867,7 @@ export function usePdfChatbotApp() {
       search,
       isLoadingDocuments,
       isUploading,
-      language: userSettings.language,
+      language: 'en',
       fileInputRef,
       onReload: () => loadDocuments(),
       onUpload: uploadPdf,
@@ -876,7 +886,7 @@ export function usePdfChatbotApp() {
       suggestedQuestions,
       isLoadingSuggestions,
       hasReadyScope,
-      language: userSettings.language,
+      language: 'en',
       error,
       messages,
       activeSessionId,
@@ -893,7 +903,7 @@ export function usePdfChatbotApp() {
       sessions: chatSessions,
       activeSessionId,
       isLoading: isLoadingHistory,
-      language: userSettings.language,
+      language: 'en',
       messages,
       onReload: () => loadChatSessions(),
       onSelectSession: loadChatSession,
@@ -926,7 +936,7 @@ export function usePdfChatbotApp() {
 function normalizeUserSettings(settings) {
   const rawSettings = settings || {};
   return {
-    language: rawSettings.language === 'vi' ? 'vi' : 'en',
+    language: 'en',
     theme: rawSettings.theme === 'dark' ? 'dark' : 'light',
   };
 }

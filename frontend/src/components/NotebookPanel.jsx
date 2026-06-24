@@ -1,5 +1,5 @@
-import React from 'react';
-import { Plus, RefreshCw, Trash2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { ChevronDown, Plus, Trash2 } from 'lucide-react';
 
 export function NotebookPanel({
   notebooks,
@@ -13,56 +13,84 @@ export function NotebookPanel({
   onCreateNotebook,
   onDeleteNotebook,
 }) {
-  const text = language === 'vi' ? viText : enText;
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const text = enText;
   const selectedNotebook = notebooks.find((notebook) => notebook.id === selectedNotebookId);
 
-  function confirmDeleteNotebook() {
-    if (!selectedNotebook || !onDeleteNotebook) return;
-    const name = selectedNotebook.title || text.untitledNotebook;
+  async function confirmDeleteNotebook(event, notebook) {
+    event.stopPropagation();
+    if (!notebook || !onDeleteNotebook) return;
+
+    const name = notebook.title || text.untitledNotebook;
     if (window.confirm(`${text.deleteNotebookConfirm} "${name}"?`)) {
-      onDeleteNotebook(selectedNotebook.id);
+      await onDeleteNotebook(notebook.id);
+      setIsDropdownOpen(false);
     }
+  }
+
+  function selectNotebook(notebookId) {
+    onSelectNotebook(notebookId);
+    setIsDropdownOpen(false);
   }
 
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
       <div className="flex items-center justify-between gap-3">
-        <div>
           <h2 className="font-bold">Notebook</h2>
-          <p className="text-sm text-zinc-500">{notebooks.length} {text.personalWorkspaces}</p>
-        </div>
-        <button
-          className="rounded-lg border border-zinc-200 p-2 text-zinc-600 hover:bg-zinc-50"
-          onClick={onReload}
-          disabled={isNotebookLoading}
-          aria-label={text.reloadNotebooks}
-        >
-          <RefreshCw size={18} className={isNotebookLoading ? 'animate-spin' : ''} />
-        </button>
       </div>
 
-      <div className="mt-4 flex gap-2">
-        <select
-          className="min-w-0 flex-1 rounded-lg border border-zinc-200 px-3 py-2.5 text-sm outline-none focus:border-teal-500 focus:ring-4 focus:ring-teal-100"
-          value={selectedNotebookId}
-          onChange={(event) => onSelectNotebook(event.target.value)}
-        >
-          {notebooks.map((notebook) => (
-            <option key={notebook.id} value={notebook.id}>
-              {notebook.title || text.untitledNotebook}
-            </option>
-          ))}
-        </select>
+      <div className="relative mt-4">
         <button
           type="button"
-          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-rose-200 bg-white text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
-          onClick={confirmDeleteNotebook}
-          disabled={!selectedNotebook || isNotebookLoading}
-          aria-label={text.deleteNotebook}
-          title={text.deleteNotebook}
+          className="flex w-full items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-3 py-2.5 text-left text-sm outline-none focus:border-teal-500 focus:ring-4 focus:ring-teal-100"
+          onClick={() => setIsDropdownOpen((current) => !current)}
+          aria-haspopup="listbox"
+          aria-expanded={isDropdownOpen}
         >
-          <Trash2 size={17} />
+          <span className="min-w-0 truncate font-medium">
+            {selectedNotebook?.title || text.untitledNotebook}
+          </span>
+          <ChevronDown
+            className={`shrink-0 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`}
+            size={17}
+          />
         </button>
+
+        {isDropdownOpen && (
+          <div
+            className="absolute left-0 right-0 z-20 mt-2 max-h-64 overflow-y-auto rounded-lg border border-zinc-200 bg-white p-1 shadow-sm"
+            role="listbox"
+          >
+            {notebooks.map((notebook) => {
+              const name = notebook.title || text.untitledNotebook;
+              const isSelected = notebook.id === selectedNotebookId;
+
+              return (
+                <div
+                  key={notebook.id}
+                  className={`flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-zinc-50 ${
+                    isSelected ? 'bg-teal-50 text-teal-900' : 'text-zinc-700'
+                  }`}
+                  role="option"
+                  aria-selected={isSelected}
+                  onClick={() => selectNotebook(notebook.id)}
+                >
+                  <span className="min-w-0 flex-1 truncate font-medium">{name}</span>
+                  <button
+                    type="button"
+                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    onClick={(event) => confirmDeleteNotebook(event, notebook)}
+                    disabled={isNotebookLoading}
+                    aria-label={`${text.deleteNotebook}: ${name}`}
+                    title={text.deleteNotebook}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <form className="mt-3 flex gap-2" onSubmit={onCreateNotebook}>
@@ -81,19 +109,9 @@ export function NotebookPanel({
 }
 
 const enText = {
-  personalWorkspaces: 'personal workspaces',
   reloadNotebooks: 'Reload notebooks',
   deleteNotebook: 'Delete notebook',
   deleteNotebookConfirm: 'Delete notebook',
   untitledNotebook: 'Untitled notebook',
   newNotebook: 'New notebook',
-};
-
-const viText = {
-  deleteNotebook: 'Xóa notebook',
-  deleteNotebookConfirm: 'Xóa notebook',
-  personalWorkspaces: 'không gian làm việc cá nhân',
-  reloadNotebooks: 'Tải lại notebook',
-  untitledNotebook: 'Notebook chưa đặt tên',
-  newNotebook: 'Notebook mới',
 };
