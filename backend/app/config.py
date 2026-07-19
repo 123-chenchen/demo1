@@ -30,7 +30,6 @@ class Settings(BaseSettings):
     embedding_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_batch_size: int = 32
     retrieval_top_k: int = 5
-    retrieval_relevance_threshold: float = 0.35
     chat_provider: str = "ollama"
     chat_temperature: float = 0.1
     ollama_base_url: str = ""

@@ -3,7 +3,6 @@ from app.services.ai.generation import (
     AnswerGenerationResult,
     generate_answer,
     generate_document_summary,
-    generate_no_relevant_document_answer,
 )
 
 __all__ = [
@@ -11,5 +10,4 @@ __all__ = [
     "AnswerGenerationResult",
     "generate_answer",
     "generate_document_summary",
-    "generate_no_relevant_document_answer",
 ]

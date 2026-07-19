@@ -2,22 +2,19 @@ from __future__ import annotations
 
 import re
 from collections import Counter, defaultdict
-from dataclasses import replace
 from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.config import get_settings
 from app.db.models import ChatMessage, ChatSession, Document, DocumentChunk, DocumentStatus, MessageRole, MessageSource, User
 from app.schemas import ChatbotAskRequest, ChatbotSuggestionsRequest
-from app.services.ai import generate_no_relevant_document_answer
 from app.services.retrieval import chunk_candidate_to_dict
 from app.services.auth import AuthNotFoundError, auth_service
 from app.services.retrieval.vector_store import VectorStoreError, upsert_document_chunks
 from app.services.chatbot.context import conversation_context_service
 from app.services.chatbot.document_summary import document_summary_service
 from app.services.chatbot.intent import ChatIntent, IntentDetectionResult, intent_detection_service
-from app.services.chatbot.retrieval_qa import RetrievalQAResult, retrieval_qa_service
+from app.services.chatbot.retrieval_qa import retrieval_qa_service
 
 _GREETING_ANSWER = "Hello! How can I help you with your uploaded documents today?"
 
@@ -160,7 +157,6 @@ class ChatbotService:
                         notebook_id=retrieval_notebook_id,
                         public_only=public_only,
                     )
-            pipeline_result = self._enforce_relevance(pipeline_result)
 
         trace = pipeline_result.trace
         generation = pipeline_result.generation
@@ -274,20 +270,6 @@ class ChatbotService:
             "total_latency_ms": trace.total_latency_ms,
             "sources": [chunk_candidate_to_dict(candidate) for candidate in trace.candidates],
         }
-
-    def _enforce_relevance(self, pipeline_result: RetrievalQAResult) -> RetrievalQAResult:
-        trace = pipeline_result.trace
-        if not trace.candidates:
-            return pipeline_result
-
-        threshold = get_settings().retrieval_relevance_threshold
-        if any(candidate.score is None or candidate.score >= threshold for candidate in trace.candidates):
-            return pipeline_result
-
-        return RetrievalQAResult(
-            trace=replace(trace, candidates=[]),
-            generation=generate_no_relevant_document_answer(),
-        )
 
     def _handle_greeting(
         self,

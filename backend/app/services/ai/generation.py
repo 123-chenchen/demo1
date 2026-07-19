@@ -186,18 +186,6 @@ def _extractive_fallback(
     )
 
 
-def generate_no_relevant_document_answer() -> AnswerGenerationResult:
-    return AnswerGenerationResult(
-        answer=(
-            "No related document found. This question does not appear to be covered by the "
-            "content of the uploaded documents."
-        ),
-        provider="extractive",
-        model_name=None,
-        used_fallback=True,
-    )
-
-
 @lru_cache
 def _get_ollama_model():
     settings = get_settings()
