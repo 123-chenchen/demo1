@@ -7,6 +7,7 @@ from enum import Enum
 
 
 class ChatIntent(str, Enum):
+    GREETING = "greeting"
     DOCUMENT_SUMMARY = "document_summary"
     RETRIEVAL_QA = "retrieval_qa"
 
@@ -26,6 +27,13 @@ def _normalize(text: str) -> str:
 
 
 class IntentDetectionService:
+    _greeting_pattern = re.compile(
+        r"^(hi+|hello+|hey+|yo+|hiya|howdy|greetings|sup|"
+        r"good\s(morning|afternoon|evening|day)|"
+        r"xin\schao|chao(\sban)?|chao\sbuoi\s(sang|chieu|toi))"
+        r"(\s(there|everyone|all|team|guys))?[\s!.,?]*$"
+    )
+
     _summary_patterns = (
         r"\bsummar(y|ize|ise|ise this|ize this)\b",
         r"\bwhat (is|s) (this|the) (document|paper|pdf|file) (about|mainly about)\b",
@@ -66,6 +74,9 @@ class IntentDetectionService:
         normalized = _normalize(query)
         if not normalized:
             return IntentDetectionResult(ChatIntent.RETRIEVAL_QA, 0.0)
+
+        if self._greeting_pattern.match(normalized):
+            return IntentDetectionResult(ChatIntent.GREETING, 0.95, self._greeting_pattern.pattern)
 
         for pattern in self._summary_patterns:
             if re.search(pattern, normalized):

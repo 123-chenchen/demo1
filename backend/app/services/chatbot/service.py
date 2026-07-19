@@ -2,19 +2,24 @@ from __future__ import annotations
 
 import re
 from collections import Counter, defaultdict
+from dataclasses import replace
 from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.config import get_settings
 from app.db.models import ChatMessage, ChatSession, Document, DocumentChunk, DocumentStatus, MessageRole, MessageSource, User
 from app.schemas import ChatbotAskRequest, ChatbotSuggestionsRequest
+from app.services.ai import generate_no_relevant_document_answer
 from app.services.retrieval import chunk_candidate_to_dict
 from app.services.auth import AuthNotFoundError, auth_service
 from app.services.retrieval.vector_store import VectorStoreError, upsert_document_chunks
 from app.services.chatbot.context import conversation_context_service
 from app.services.chatbot.document_summary import document_summary_service
-from app.services.chatbot.intent import ChatIntent, intent_detection_service
-from app.services.chatbot.retrieval_qa import retrieval_qa_service
+from app.services.chatbot.intent import ChatIntent, IntentDetectionResult, intent_detection_service
+from app.services.chatbot.retrieval_qa import RetrievalQAResult, retrieval_qa_service
+
+_GREETING_ANSWER = "Hello! How can I help you with your uploaded documents today?"
 
 
 class ChatbotServiceError(Exception):
@@ -75,6 +80,10 @@ class ChatbotService:
         request: ChatbotAskRequest,
         current_user: User | None = None,
     ) -> dict[str, object]:
+        intent = intent_detection_service.detect(request.query)
+        if intent.intent == ChatIntent.GREETING:
+            return self._handle_greeting(db, request=request, current_user=current_user, intent=intent)
+
         requested_document_ids = self._requested_document_ids(request)
         selected_notebook = self._resolve_requested_notebook(
             db,
@@ -120,7 +129,6 @@ class ChatbotService:
             retrieval_notebook_id = selected_notebook.id if selected_notebook is not None else None
             public_only = current_user is None
 
-        intent = intent_detection_service.detect(request.query)
         source_strategy = None
         if intent.intent == ChatIntent.DOCUMENT_SUMMARY and accessible_document is not None:
             pipeline_result = document_summary_service.summarize(
@@ -152,6 +160,7 @@ class ChatbotService:
                         notebook_id=retrieval_notebook_id,
                         public_only=public_only,
                     )
+            pipeline_result = self._enforce_relevance(pipeline_result)
 
         trace = pipeline_result.trace
         generation = pipeline_result.generation
@@ -264,6 +273,96 @@ class ChatbotService:
             "retrieval_latency_ms": trace.retrieval_latency_ms,
             "total_latency_ms": trace.total_latency_ms,
             "sources": [chunk_candidate_to_dict(candidate) for candidate in trace.candidates],
+        }
+
+    def _enforce_relevance(self, pipeline_result: RetrievalQAResult) -> RetrievalQAResult:
+        trace = pipeline_result.trace
+        if not trace.candidates:
+            return pipeline_result
+
+        threshold = get_settings().retrieval_relevance_threshold
+        if any(candidate.score is None or candidate.score >= threshold for candidate in trace.candidates):
+            return pipeline_result
+
+        return RetrievalQAResult(
+            trace=replace(trace, candidates=[]),
+            generation=generate_no_relevant_document_answer(),
+        )
+
+    def _handle_greeting(
+        self,
+        db: Session,
+        *,
+        request: ChatbotAskRequest,
+        current_user: User | None = None,
+        intent: IntentDetectionResult,
+    ) -> dict[str, object]:
+        answer = _GREETING_ANSWER
+        session_id = request.session_id
+        user_message_id = None
+        assistant_message_id = None
+
+        if request.save_history:
+            session = self._resolve_or_create_session(
+                db,
+                session_id=request.session_id,
+                query=request.query,
+                current_user=current_user,
+                selected_notebook=None,
+            )
+            session_id = session.id
+
+            user_message = ChatMessage(
+                session_id=session.id,
+                role=MessageRole.user,
+                content=request.query,
+                extra_metadata={
+                    "intent": intent.intent.value,
+                    "intent_confidence": intent.confidence,
+                    "intent_matched_pattern": intent.matched_pattern,
+                },
+            )
+            db.add(user_message)
+            db.flush()
+
+            assistant_message = ChatMessage(
+                session_id=session.id,
+                role=MessageRole.assistant,
+                reply_to_message_id=user_message.id,
+                content=answer,
+                model_name=None,
+                extra_metadata={
+                    "intent": intent.intent.value,
+                    "generator_provider": "greeting",
+                    "used_fallback_generator": False,
+                },
+            )
+            db.add(assistant_message)
+            db.flush()
+
+            db.commit()
+            user_message_id = user_message.id
+            assistant_message_id = assistant_message.id
+
+        return {
+            "query": request.query,
+            "answer": answer,
+            "notebook_id": None,
+            "document_id": None,
+            "document_ids": [],
+            "document_names": [],
+            "session_id": session_id,
+            "user_message_id": user_message_id,
+            "assistant_message_id": assistant_message_id,
+            "retriever": "none",
+            "embedding_model": "none",
+            "vector_store": "none",
+            "generator_provider": "greeting",
+            "generator_model_name": None,
+            "used_fallback_generator": False,
+            "retrieval_latency_ms": 0.0,
+            "total_latency_ms": 0.0,
+            "sources": [],
         }
 
     def suggest_questions(

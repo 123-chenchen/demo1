@@ -21,6 +21,23 @@ def test_keeps_specific_question_on_retrieval_qa_path() -> None:
     assert result.intent == ChatIntent.RETRIEVAL_QA
 
 
+def test_detects_greeting_intent_for_common_greetings() -> None:
+    service = IntentDetectionService()
+
+    for greeting in ("Hi", "hello!", "Hey there", "Good morning", "  Hi   ", "howdy"):
+        result = service.detect(greeting)
+        assert result.intent == ChatIntent.GREETING, greeting
+        assert result.confidence > 0.8
+
+
+def test_greeting_only_matches_when_message_is_only_a_greeting() -> None:
+    service = IntentDetectionService()
+
+    result = service.detect("Hi, what is this document about?")
+
+    assert result.intent != ChatIntent.GREETING
+
+
 def test_summary_selection_prefers_structural_sections() -> None:
     service = DocumentSummaryService()
     chunks = [

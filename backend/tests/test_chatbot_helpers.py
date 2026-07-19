@@ -11,9 +11,11 @@ from app.services.ai.generation import (
     _is_low_information_answer,
     _required_answer_language,
     generate_answer,
+    generate_no_relevant_document_answer,
 )
-from app.services.chatbot.service import _build_session_title
-from app.services.retrieval.models import ChunkCandidate
+from app.services.chatbot.retrieval_qa import RetrievalQAResult
+from app.services.chatbot.service import ChatbotService, _build_session_title
+from app.services.retrieval.models import ChunkCandidate, RetrievalTrace
 
 
 def test_build_session_title_keeps_short_query_intact() -> None:
@@ -113,3 +115,71 @@ def test_clean_model_answer_removes_parenthetical_translation_note() -> None:
     answer = "The document does not provide this information.\n\n(Translation: redundant note.)"
 
     assert _clean_model_answer(answer) == "The document does not provide this information."
+
+
+def test_generate_no_relevant_document_answer_is_a_clear_fallback() -> None:
+    result = generate_no_relevant_document_answer()
+
+    assert result.provider == "extractive"
+    assert result.used_fallback is True
+    assert "No related document found" in result.answer
+
+
+def _low_score_candidate() -> ChunkCandidate:
+    return ChunkCandidate(
+        chunk_id=uuid4(),
+        document_id=uuid4(),
+        original_file_name="report.pdf",
+        storage_key="pdf-documents/documents/report.pdf",
+        content="Unrelated content that does not match the question.",
+        chunk_index=0,
+        page_from=1,
+        page_to=1,
+        token_count=10,
+        character_count=52,
+        score=0.05,
+        source="langchain-qdrant",
+    )
+
+
+def test_enforce_relevance_replaces_low_score_candidates_with_no_document_answer() -> None:
+    service = ChatbotService()
+    candidate = _low_score_candidate()
+    trace = RetrievalTrace(
+        query="What is the weather today?",
+        candidates=[candidate],
+        retrieval_latency_ms=1.0,
+        total_latency_ms=2.0,
+        retriever="langchain-qdrant",
+        embedding_model="test-model",
+        vector_store="qdrant",
+    )
+    original_generation = generate_answer(query="What is the weather today?", candidates=[candidate])
+    pipeline_result = RetrievalQAResult(trace=trace, generation=original_generation)
+
+    enforced = service._enforce_relevance(pipeline_result)
+
+    assert enforced.trace.candidates == []
+    assert "No related document found" in enforced.generation.answer
+    assert enforced.generation.used_fallback is True
+
+
+def test_enforce_relevance_keeps_result_when_a_candidate_is_relevant() -> None:
+    service = ChatbotService()
+    relevant_candidate = _low_score_candidate()
+    relevant_candidate.score = 0.8
+    trace = RetrievalTrace(
+        query="What does the report say?",
+        candidates=[relevant_candidate],
+        retrieval_latency_ms=1.0,
+        total_latency_ms=2.0,
+        retriever="langchain-qdrant",
+        embedding_model="test-model",
+        vector_store="qdrant",
+    )
+    generation = generate_answer(query="What does the report say?", candidates=[relevant_candidate])
+    pipeline_result = RetrievalQAResult(trace=trace, generation=generation)
+
+    enforced = service._enforce_relevance(pipeline_result)
+
+    assert enforced is pipeline_result
